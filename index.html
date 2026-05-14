@@ -63,7 +63,7 @@ function Spinner({text}) {
 function StepBar({cur}) {
   return <div style={s.stepBar}>{STEPS.map((st,i)=>(
     <div key={st} style={{padding:"12px 16px",fontSize:"12px",fontWeight:"500",color:i<cur?ACCENT2:i===cur?"#fff":"#4A4A6A",borderBottom:i===cur?`2px solid ${ACCENT}`:"2px solid transparent",whiteSpace:"nowrap"}}>
-      {i<cur?"✓ ":`${i+1}. "}{st}
+      {i<cur?"✓ ":i+1+". "}{st}
     </div>
   ))}</div>;
 }
