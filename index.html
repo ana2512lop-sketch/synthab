@@ -79,7 +79,7 @@ async function callClaude(apiKey, messages, system) {
 }
 
 function parseJSON(raw) {
-  const clean = raw.replace(/```json|```/g,"").trim();
+  const clean = raw.replace(/```json/g,"").replace(/```/g,"").trim();
   const s1 = clean.indexOf("["), s2 = clean.indexOf("{");
   if(s1!==-1 && (s2===-1||s1<s2)) return JSON.parse(clean.slice(s1,clean.lastIndexOf("]")+1));
   return JSON.parse(clean.slice(s2,clean.lastIndexOf("}")+1));
