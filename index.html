@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SynthAB — A/B testing sintético</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0A0A0F; color: #E8E6FF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    input, select, textarea, button { font-family: inherit; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0A0A0F; } ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 3px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef } = React;
+const ACCENT = "#6C63FF", ACCENT2 = "#00D4AA";
+const STEPS = ["Datos","Perfiles","Test A/B","Simulación","Resultados"];
+const AVATARS = ["#6C63FF","#00D4AA","#FF6B9D","#F5A623","#4ECDC4"];
+const INITIALS = ["MG","JR","LP","AR","CS"];
+
+const s = {
+  header: { borderBottom:"1px solid #1E1E2E", padding:"16px 28px", display:"flex", alignItems:"center", justifyContent:"space-between", background:"#0D0D14" },
+  logo: { fontSize:"15px", fontWeight:"600", color:"#fff", display:"flex", alignItems:"center", gap:"8px" },
+  dot: { width:"8px", height:"8px", borderRadius:"50%", background:ACCENT2 },
+  stepBar: { display:"flex", background:"#0D0D14", borderBottom:"1px solid #1E1E2E", overflowX:"auto" },
+  main: { maxWidth:"700px", margin:"0 auto", padding:"36px 20px" },
+  card: { background:"#13131F", border:"1px solid #1E1E2E", borderRadius:"12px", padding:"18px 20px", marginBottom:"12px" },
+  title: { fontSize:"21px", fontWeight:"600", color:"#fff", margin:"0 0 5px", letterSpacing:"-0.4px" },
+  sub: { fontSize:"13px", color:"#6B6B9A", margin:"0 0 24px", lineHeight:"1.6" },
+  label: { fontSize:"12px", color:"#6B6B9A", marginBottom:"5px", display:"block", fontWeight:"500" },
+  input: { width:"100%", background:"#0A0A14", border:"1px solid #2A2A3E", borderRadius:"8px", padding:"9px 11px", color:"#E8E6FF", fontSize:"13px", outline:"none", boxSizing:"border-box" },
+  textarea: { width:"100%", background:"#0A0A14", border:"1px solid #2A2A3E", borderRadius:"8px", padding:"9px 11px", color:"#E8E6FF", fontSize:"13px", outline:"none", boxSizing:"border-box", resize:"vertical", minHeight:"75px" },
+  select: { width:"100%", background:"#0A0A14", border:"1px solid #2A2A3E", borderRadius:"8px", padding:"9px 11px", color:"#E8E6FF", fontSize:"13px", outline:"none", boxSizing:"border-box" },
+  btn: { background:ACCENT, color:"#fff", border:"none", borderRadius:"8px", padding:"10px 20px", fontSize:"13px", fontWeight:"600", cursor:"pointer" },
+  btnG: { background:ACCENT2, color:"#000", border:"none", borderRadius:"8px", padding:"10px 20px", fontSize:"13px", fontWeight:"600", cursor:"pointer" },
+  btnO: { background:"transparent", color:"#8B8BCC", border:"1px solid #2A2A3E", borderRadius:"8px", padding:"9px 16px", fontSize:"13px", cursor:"pointer" },
+  btnRow: { display:"flex", justifyContent:"flex-end", gap:"10px", marginTop:"20px" },
+  tag: (c) => ({ fontSize:"11px", fontWeight:"600", padding:"2px 8px", borderRadius:"20px", background:c==="green"?"#0D2E22":c==="amber"?"#2E1E05":c==="purple"?"#1A1535":"#1E1E2E", color:c==="green"?ACCENT2:c==="amber"?"#F5A623":c==="purple"?ACCENT:"#6B6B9A" }),
+  upload: (d) => ({ border:`1.5px dashed ${d?ACCENT2:"#2A2A3E"}`, borderRadius:"10px", padding:"24px", textAlign:"center", cursor:"pointer", background:d?"#0D1F1C":"#0A0A14" }),
+  spinner: { width:"30px", height:"30px", border:"3px solid #1E1E2E", borderTop:`3px solid ${ACCENT}`, borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 12px" },
+  pCard: { background:"#0D0D18", border:"1px solid #1E1E2E", borderRadius:"10px", padding:"12px 14px", marginBottom:"8px" },
+  av: (c) => ({ width:"30px", height:"30px", borderRadius:"50%", background:c, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"10px", fontWeight:"700", color:"#fff", flexShrink:0 }),
+  attrG: { display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"5px" },
+  attr: { background:"#13131F", borderRadius:"6px", padding:"4px 7px" },
+  mRow: { display:"flex", alignItems:"center", gap:"10px", padding:"8px 0", borderBottom:"1px solid #1A1A2E" },
+  iRow: { display:"flex", gap:"8px", alignItems:"flex-start", padding:"7px 0", borderBottom:"1px solid #1A1A2E", fontSize:"13px", color:"#9B99CC", lineHeight:"1.6" },
+  sRow: { display:"flex", alignItems:"center", gap:"8px", padding:"7px 0", borderBottom:"1px solid #1A1A2E", fontSize:"12px", color:"#9B99CC" },
+  winner: { background:"linear-gradient(135deg,#0D2520,#0D1535)", border:`1px solid ${ACCENT2}33`, borderRadius:"12px", padding:"18px 20px", marginBottom:"18px", display:"flex", alignItems:"center", gap:"14px" },
+};
+
+function Spinner({text}) {
+  return <div style={{textAlign:"center",padding:"36px"}}>
+    <div style={s.spinner}/><p style={{color:"#6B6B9A",fontSize:"13px"}}>{text}</p>
+  </div>;
+}
+
+function StepBar({cur}) {
+  return <div style={s.stepBar}>{STEPS.map((st,i)=>(
+    <div key={st} style={{padding:"12px 16px",fontSize:"12px",fontWeight:"500",color:i<cur?ACCENT2:i===cur?"#fff":"#4A4A6A",borderBottom:i===cur?`2px solid ${ACCENT}`:"2px solid transparent",whiteSpace:"nowrap"}}>
+      {i<cur?"✓ ":`${i+1}. "}{st}
+    </div>
+  ))}</div>;
+}
+
+async function callClaude(apiKey, messages, system) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system,messages})
+  });
+  const data = await res.json();
+  return data.content?.map(b=>b.text||"").join("") || "";
+}
+
+function parseJSON(raw) {
+  const clean = raw.replace(/```json|```/g,"").trim();
+  const s1 = clean.indexOf("["), s2 = clean.indexOf("{");
+  if(s1!==-1 && (s2===-1||s1<s2)) return JSON.parse(clean.slice(s1,clean.lastIndexOf("]")+1));
+  return JSON.parse(clean.slice(s2,clean.lastIndexOf("}")+1));
+}
+
+// API KEY
+function ApiScreen({onReady}) {
+  const [key,setKey]=useState(""), [err,setErr]=useState(""), [loading,setLoading]=useState(false);
+  const verify = async()=>{
+    if(!key.startsWith("sk-ant-")){setErr("Debe empezar por sk-ant-");return;}
+    setLoading(true);setErr("");
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:10,messages:[{role:"user",content:"hi"}]})});
+      if(res.ok)onReady(key); else setErr("Clave inválida. Compruébala en console.anthropic.com");
+    }catch{setErr("Error de conexión.");}
+    setLoading(false);
+  };
+  return <div style={{maxWidth:"440px",margin:"0 auto",padding:"48px 20px"}}>
+    <div style={{textAlign:"center",marginBottom:"28px"}}>
+      <div style={{fontSize:"28px",marginBottom:"10px"}}>⬡</div>
+      <p style={{...s.title,textAlign:"center"}}>SynthAB</p>
+      <p style={{...s.sub,textAlign:"center"}}>A/B testing con usuarios sintéticos</p>
+    </div>
+    <div style={s.card}>
+      <label style={s.label}>Clave API de Anthropic</label>
+      <input style={{...s.input,fontFamily:"monospace",fontSize:"12px"}} type="password" placeholder="sk-ant-api03-..." value={key} onChange={e=>setKey(e.target.value)} onKeyDown={e=>e.key==="Enter"&&verify()}/>
+      {err&&<p style={{color:"#FF6B6B",fontSize:"12px",marginTop:"7px"}}>{err}</p>}
+      <p style={{fontSize:"11px",color:"#3E3E5E",marginTop:"9px",lineHeight:"1.6"}}>Consíguela gratis en <a href="https://console.anthropic.com" target="_blank" style={{color:ACCENT}}>console.anthropic.com</a> → API Keys. Solo se usa en tu navegador.</p>
+    </div>
+    <button style={{...s.btn,width:"100%",opacity:key.length>10?1:0.4}} disabled={key.length<10||loading} onClick={verify}>{loading?"Verificando...":"Entrar →"}</button>
+  </div>;
+}
+
+// STEP 0
+function StepData({onNext}) {
+  const [drag,setDrag]=useState(false),[content,setContent]=useState(""),[name,setName]=useState(""),[sector,setSector]=useState("moda"),[mode,setMode]=useState("upload"),[manual,setManual]=useState("");
+  const ref=useRef();
+  const handleFile=f=>{if(!f)return;setName(f.name);const r=new FileReader();r.onload=e=>setContent(e.target.result);r.readAsText(f);};
+  const ejemplo=()=>{setContent(`edad,genero,dispositivo,ciudad,canal,cvr,sesiones\n18-24,mujer,mobile,Madrid,Instagram,0.028,1200\n25-34,mujer,mobile,Madrid,Orgánico,0.041,2100\n25-34,hombre,desktop,Barcelona,Google Ads,0.038,1800\n35-44,mujer,desktop,Valencia,Email,0.058,1400\n45-54,mujer,desktop,Sevilla,Email,0.061,700\n55+,hombre,desktop,Madrid,Directo,0.021,200`);setName("datos_ejemplo.csv");};
+  const ok=content||manual;
+  return <div>
+    <p style={s.title}>Datos del cliente</p><p style={s.sub}>Carga el export de GA4 o usa datos de ejemplo.</p>
+    <div style={s.card}>
+      <label style={s.label}>Sector</label>
+      <select style={s.select} value={sector} onChange={e=>setSector(e.target.value)}>
+        {["moda","hogar","electrónica","belleza","alimentación","deporte"].map(o=><option key={o}>{o}</option>)}
+      </select>
+    </div>
+    <div style={s.card}>
+      <div style={{display:"flex",gap:"8px",marginBottom:"12px"}}>
+        {["upload","manual"].map(m=><button key={m} onClick={()=>setMode(m)} style={{...s.btnO,borderColor:mode===m?ACCENT:"#2A2A3E",color:mode===m?"#C8C6FF":"#6B6B9A"}}>{m==="upload"?"Subir CSV":"Pegar datos"}</button>)}
+      </div>
+      {mode==="upload"?<div style={s.upload(drag)} onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}} onClick={()=>ref.current.click()}>
+        <input ref={ref} type="file" accept=".csv,.txt" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+        <div style={{fontSize:"22px",marginBottom:"7px"}}>📂</div>
+        {name?<p style={{color:ACCENT2,fontWeight:"600",fontSize:"13px"}}>✓ {name}</p>:<><p style={{fontSize:"13px",color:"#6B6B9A"}}>Arrastra CSV o haz clic</p><p style={{fontSize:"11px",color:"#3E3E5E",marginTop:"4px"}}>Export demográfico de GA4</p></>}
+      </div>:<textarea style={{...s.textarea,minHeight:"100px"}} value={manual} onChange={e=>setManual(e.target.value)} placeholder="edad,genero,dispositivo,ciudad,canal,cvr&#10;25-34,mujer,mobile,Madrid,Instagram,0.041"/>}
+      <button onClick={ejemplo} style={{...s.btnO,marginTop:"10px",fontSize:"12px",padding:"6px 12px"}}>Usar datos de ejemplo →</button>
+    </div>
+    <div style={s.btnRow}><button style={{...s.btn,opacity:ok?1:0.4}} disabled={!ok} onClick={()=>onNext({data:content||manual,sector})}>Generar perfiles →</button></div>
+  </div>;
+}
+
+// STEP 1
+function StepPerfiles({input,apiKey,onNext,onBack}) {
+  const [loading,setLoading]=useState(false),[profiles,setProfiles]=useState(null),[n,setN]=useState(20),[err,setErr]=useState("");
+  const generar=async()=>{
+    setLoading(true);setErr("");
+    try{
+      const raw=await callClaude(apiKey,[{role:"user",content:`Analiza estos datos de un ecommerce de ${input.sector}:\n\n${input.data}\n\nGenera exactamente ${n} perfiles sintéticos respetando las distribuciones. Devuelve SOLO un array JSON:\n[{"id":"001","edad":"25-34","genero":"mujer","ciudad":"Madrid","dispositivo":"mobile","madurez":4,"canal":"Instagram","tipo":"recurrente","prob_conversion":0.041,"initials":"MG"}]`}],"Eres experto en analítica web. Responde en español. SOLO JSON válido sin texto extra.");
+      setProfiles(parseJSON(raw));
+    }catch{setErr("Error generando perfiles. Intenta de nuevo.");}
+    setLoading(false);
+  };
+  return <div>
+    <p style={s.title}>Perfiles sintéticos</p><p style={s.sub}>La IA crea usuarios que respetan las distribuciones reales.</p>
+    {!profiles&&!loading&&<div style={s.card}>
+      <label style={s.label}>Número de perfiles</label>
+      <select style={s.select} value={n} onChange={e=>setN(Number(e.target.value))}>
+        <option value={10}>10 perfiles (prueba rápida)</option>
+        <option value={20}>20 perfiles (recomendado)</option>
+        <option value={50}>50 perfiles (más representativo)</option>
+      </select>
+      {err&&<p style={{color:"#FF6B6B",fontSize:"12px",marginTop:"7px"}}>{err}</p>}
+      <div style={s.btnRow}><button style={s.btnO} onClick={onBack}>← Atrás</button><button style={s.btn} onClick={generar}>Generar →</button></div>
+    </div>}
+    {loading&&<Spinner text="Generando perfiles con IA..."/>}
+    {profiles&&<>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
+        <span style={s.tag("green")}>✓ {profiles.length} perfiles generados</span>
+        <button style={{...s.btnO,fontSize:"11px",padding:"4px 9px"}} onClick={()=>setProfiles(null)}>Regenerar</button>
+      </div>
+      <div style={{maxHeight:"360px",overflowY:"auto",marginBottom:"12px"}}>
+        {profiles.slice(0,8).map((p,i)=><div key={p.id} style={s.pCard}>
+          <div style={{display:"flex",alignItems:"center",gap:"9px",marginBottom:"9px"}}>
+            <div style={s.av(AVATARS[i%5])}>{p.initials||INITIALS[i%5]}</div>
+            <div style={{flex:1}}><div style={{fontSize:"13px",fontWeight:"600",color:"#E8E6FF"}}>Perfil #{p.id}</div><div style={{fontSize:"11px",color:"#6B6B9A"}}>{p.edad} · {p.genero} · {p.tipo}</div></div>
+            <span style={s.tag(p.prob_conversion>0.05?"green":"amber")}>CVR {(p.prob_conversion*100).toFixed(1)}%</span>
+          </div>
+          <div style={s.attrG}>{[["Ciudad",p.ciudad],["Dispositivo",p.dispositivo],["Canal",p.canal],["Madurez",`${p.madurez}/5`]].map(([k,v])=><div key={k} style={s.attr}><div style={{fontSize:"10px",color:"#4A4A6A"}}>{k}</div><div style={{fontSize:"12px",color:"#C8C6FF",fontWeight:"500"}}>{v}</div></div>)}</div>
+        </div>)}
+        {profiles.length>8&&<p style={{fontSize:"12px",color:"#4A4A6A",textAlign:"center",padding:"7px"}}>+{profiles.length-8} perfiles más</p>}
+      </div>
+      <div style={s.btnRow}><button style={s.btnO} onClick={onBack}>← Atrás</button><button style={s.btn} onClick={()=>onNext(profiles)}>Configurar test →</button></div>
+    </>}
+  </div>;
+}
+
+// STEP 2
+function StepTest({onNext,onBack}) {
+  const [f,setF]=useState({hipotesis:"",pagina:"página de producto",varA:"",varB:"",metrica:"tasa de conversión",split:50});
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const ok=f.varA&&f.varB&&f.hipotesis;
+  return <div>
+    <p style={s.title}>Configurar test A/B</p><p style={s.sub}>Define la hipótesis y las dos variantes.</p>
+    <div style={s.card}><label style={s.label}>Hipótesis</label><textarea style={s.textarea} value={f.hipotesis} onChange={e=>set("hipotesis",e.target.value)} placeholder="Creemos que [cambio] aumentará [métrica] porque [razón]..."/></div>
+    <div style={s.card}><label style={s.label}>Página testada</label><select style={s.select} value={f.pagina} onChange={e=>set("pagina",e.target.value)}>{["página de producto","homepage","checkout","categoría","carrito"].map(o=><option key={o}>{o}</option>)}</select></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
+      {[["A","Control","purple",f.varA,v=>set("varA",v),"Ej: Botón azul 'Añadir al carrito'"],["B","Cambio","green",f.varB,v=>set("varB",v),"Ej: Botón verde 'Comprar ahora'"]].map(([l,sub,c,val,setter,ph])=><div key={l} style={s.card}>
+        <div style={{marginBottom:"9px"}}><span style={s.tag(c)}>Variante {l} — {sub}</span></div>
+        <label style={s.label}>Descripción</label><input style={s.input} value={val} onChange={e=>setter(e.target.value)} placeholder={ph}/>
+      </div>)}
+    </div>
+    <div style={s.card}>
+      <label style={s.label}>Métrica principal</label>
+      <select style={s.select} value={f.metrica} onChange={e=>set("metrica",e.target.value)}>{["tasa de conversión","clics en CTA","tasa de rebote","tiempo en página","añadidos al carrito"].map(o=><option key={o}>{o}</option>)}</select>
+      <div style={{marginTop:"12px"}}><label style={s.label}>Split: A {f.split}% / B {100-f.split}%</label><input type="range" min="10" max="90" step="5" value={f.split} onChange={e=>set("split",Number(e.target.value))} style={{width:"100%",accentColor:ACCENT}}/></div>
+    </div>
+    <div style={s.btnRow}><button style={s.btnO} onClick={onBack}>← Atrás</button><button style={{...s.btn,opacity:ok?1:0.4}} disabled={!ok} onClick={()=>onNext(f)}>Lanzar simulación →</button></div>
+  </div>;
+}
+
+// STEP 3
+function StepSim({profiles,test,input,apiKey,onNext,onBack}) {
+  const [loading,setLoading]=useState(false),[done,setDone]=useState(false),[res,setRes]=useState(null),[err,setErr]=useState("");
+  const simular=async()=>{
+    setLoading(true);setErr("");
+    try{
+      const sample=profiles.slice(0,20).map(p=>({id:p.id,edad:p.edad,genero:p.genero,dispositivo:p.dispositivo,madurez:p.madurez,canal:p.canal,prob_conversion:p.prob_conversion}));
+      const raw=await callClaude(apiKey,[{role:"user",content:`Simula test A/B sobre ${sample.length} perfiles de ecommerce de ${input.sector}.\nHIPÓTESIS: ${test.hipotesis}\nPÁGINA: ${test.pagina}\nVARIANTE A: ${test.varA}\nVARIANTE B: ${test.varB}\nMÉTRICA: ${test.metrica}\nSPLIT: ${test.split}% A / ${100-test.split}% B\nPERFILES: ${JSON.stringify(sample)}\n\nDevuelve SOLO este JSON:\n{"ganador":"B","confianza":94,"uplift_cvr":11.4,"cvr_a":3.4,"cvr_b":3.8,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,"segmentos":[{"nombre":"18-24","resultado":"B gana","diff_pct":22}],"razones_abandono":["razón 1","razón 2"],"insights":["insight 1","insight 2"],"recomendacion":"texto"}`}],"Eres motor de simulación A/B. Responde en español. SOLO JSON válido.");
+      setRes(parseJSON(raw));setDone(true);
+    }catch{setErr("Error en simulación. Intenta de nuevo.");}
+    setLoading(false);
+  };
+  return <div>
+    <p style={s.title}>Simulación</p><p style={s.sub}>Los agentes navegan las variantes y deciden según su perfil.</p>
+    {!done&&!loading&&<div style={s.card}>
+      <p style={{fontSize:"13px",color:"#9B99CC",margin:"0 0 12px",lineHeight:"1.6"}}><strong style={{color:"#E8E6FF"}}>{profiles.length} agentes</strong> distribuidos entre variante A y B.</p>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"12px"}}>
+        {[["Variante A",test.varA,ACCENT],["Variante B",test.varB,ACCENT2]].map(([l,d,c])=><div key={l} style={{background:"#0A0A14",borderRadius:"8px",padding:"11px 13px",border:`1px solid ${c}33`}}><div style={{fontSize:"11px",fontWeight:"700",color:c,marginBottom:"3px"}}>{l}</div><div style={{fontSize:"13px",color:"#C8C6FF"}}>{d}</div></div>)}
+      </div>
+      {err&&<p style={{color:"#FF6B6B",fontSize:"12px"}}>{err}</p>}
+      <div style={s.btnRow}><button style={s.btnO} onClick={onBack}>← Atrás</button><button style={s.btn} onClick={simular}>Lanzar →</button></div>
+    </div>}
+    {loading&&<Spinner text={`Simulando ${profiles.length} agentes...`}/>}
+    {done&&<><p style={{fontSize:"12px",color:ACCENT2,marginBottom:"14px"}}>✓ Simulación completada</p><div style={s.btnRow}><button style={s.btnO} onClick={onBack}>← Atrás</button><button style={s.btn} onClick={()=>onNext(res)}>Ver resultados →</button></div></>}
+  </div>;
+}
+
+// STEP 4
+function StepResultados({results,test}) {
+  const gB=results.ganador==="B";
+  const IC=[ACCENT2,"#F5A623","#FF6B6B"];
+  const copy=()=>{navigator.clipboard.writeText(`RESULTADOS TEST A/B — SynthAB\n\nGanador: Variante ${results.ganador}\nUplift CVR: ${results.uplift_cvr>0?"+":""}${Number(results.uplift_cvr).toFixed(1)}%\nConfianza: ${results.confianza}%\n\nA: ${test.varA}\nB: ${test.varB}\n\nRecomendación: ${results.recomendacion}`);alert("Copiado al portapapeles");};
+  return <div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"18px",flexWrap:"wrap",gap:"8px"}}>
+      <div><p style={{...s.title,marginBottom:"3px"}}>Resultados</p><p style={{fontSize:"12px",color:"#4A4A6A"}}>{test.varA} vs {test.varB}</p></div>
+      <button style={{...s.btnO,fontSize:"12px",padding:"6px 12px"}} onClick={copy}>Copiar resultados</button>
+    </div>
+    <div style={s.winner}>
+      <div style={{width:"44px",height:"44px",borderRadius:"50%",background:`${ACCENT2}22`,border:`1px solid ${ACCENT2}55`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",flexShrink:0}}>🏆</div>
+      <div style={{flex:1}}><div style={{fontSize:"15px",fontWeight:"700",color:ACCENT2,marginBottom:"2px"}}>Variante {results.ganador} gana — {results.ganador==="B"?test.varB:test.varA}</div><div style={{fontSize:"12px",color:"#4A8A70"}}>{results.confianza}% confianza estadística</div></div>
+      <div style={{textAlign:"right"}}><div style={{fontSize:"24px",fontWeight:"700",color:gB?ACCENT2:"#FF6B6B"}}>{results.uplift_cvr>0?"+":""}{Number(results.uplift_cvr).toFixed(1)}%</div><div style={{fontSize:"11px",color:"#4A6A5A"}}>uplift CVR</div></div>
+    </div>
+    <div style={s.card}>
+      <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 6px"}}>Métricas</p>
+      {[{name:"Tasa de conversión",a:`${results.cvr_a?.toFixed(1)}%`,b:`${results.cvr_b?.toFixed(1)}%`,diff:results.uplift_cvr,pos:gB},{name:"Clics CTA",a:`${results.clics_cta_a}%`,b:`${results.clics_cta_b}%`,diff:(((results.clics_cta_b-results.clics_cta_a)/(results.clics_cta_a||1))*100).toFixed(1),pos:results.clics_cta_b>results.clics_cta_a},{name:"Tasa rebote",a:`${results.rebote_a}%`,b:`${results.rebote_b}%`,diff:(((results.rebote_b-results.rebote_a)/(results.rebote_a||1))*100).toFixed(1),pos:results.rebote_b<results.rebote_a}].map(m=><div key={m.name} style={s.mRow}>
+        <span style={{fontSize:"13px",color:"#9B99CC",flex:1}}>{m.name}</span>
+        <span style={{fontSize:"13px",color:"#6B6B9A"}}>A: {m.a}</span>
+        <span style={{fontSize:"14px",fontWeight:"600",color:"#fff"}}>B: {m.b}</span>
+        <span style={{fontSize:"11px",fontWeight:"700",padding:"2px 8px",borderRadius:"20px",background:m.pos?"#0D2E22":"#2E0D0D",color:m.pos?ACCENT2:"#FF6B6B"}}>{m.diff>0?"+":""}{Number(m.diff).toFixed(1)}%</span>
+      </div>)}
+    </div>
+    {results.segmentos?.length>0&&<div style={s.card}>
+      <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 6px"}}>Por segmento</p>
+      {results.segmentos.map(sg=><div key={sg.nombre} style={s.sRow}><span style={{minWidth:"55px",fontWeight:"600",color:"#C8C6FF"}}>{sg.nombre}</span><span style={{flex:1}}>{sg.resultado}</span><span style={s.tag(sg.resultado.includes("B")?"green":"amber")}>{sg.diff_pct>0?"+":""}{sg.diff_pct}%</span></div>)}
+    </div>}
+    {results.razones_abandono?.length>0&&<div style={s.card}>
+      <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 6px"}}>Razones de abandono</p>
+      {results.razones_abandono.map((r,i)=><div key={i} style={s.iRow}><div style={{width:"7px",height:"7px",borderRadius:"50%",background:ACCENT,flexShrink:0,marginTop:"6px"}}/>{r}</div>)}
+    </div>}
+    {results.insights?.length>0&&<div style={s.card}>
+      <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 6px"}}>Insights clave</p>
+      {results.insights.map((ins,i)=><div key={i} style={s.iRow}><div style={{width:"7px",height:"7px",borderRadius:"50%",background:IC[i]||"#6B6B9A",flexShrink:0,marginTop:"6px"}}/>{ins}</div>)}
+    </div>}
+    {results.recomendacion&&<div style={{background:"#1A1535",border:`1px solid ${ACCENT}33`,borderRadius:"12px",padding:"16px 18px",marginBottom:"12px",display:"flex",gap:"10px"}}>
+      <div style={{fontSize:"18px",flexShrink:0}}>✦</div>
+      <div><p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 3px"}}>Recomendación</p><p style={{fontSize:"13px",color:"#8B8BCC",margin:0,lineHeight:"1.6"}}>{results.recomendacion}</p></div>
+    </div>}
+    <div style={s.btnRow}><button style={s.btnG} onClick={()=>window.location.reload()}>Nuevo test →</button></div>
+  </div>;
+}
+
+// MAIN
+function App() {
+  const [apiKey,setApiKey]=useState(""),[step,setStep]=useState(0),[dataInput,setDataInput]=useState(null),[profiles,setProfiles]=useState([]),[testConfig,setTestConfig]=useState(null),[results,setResults]=useState(null);
+  if(!apiKey) return <div><div style={s.header}><div style={s.logo}><div style={s.dot}/>SynthAB</div></div><ApiScreen onReady={setApiKey}/></div>;
+  return <div>
+    <div style={s.header}>
+      <div style={s.logo}><div style={s.dot}/>SynthAB<span style={{fontSize:"11px",color:"#4A4A6A",fontWeight:"400",marginLeft:"4px"}}>piloto</span></div>
+      <button style={{...s.btnO,fontSize:"11px",padding:"4px 9px"}} onClick={()=>setApiKey("")}>Cambiar API key</button>
+    </div>
+    <StepBar cur={step}/>
+    <div style={s.main}>
+      {step===0&&<StepData onNext={d=>{setDataInput(d);setStep(1);}}/>}
+      {step===1&&<StepPerfiles input={dataInput} apiKey={apiKey} onNext={p=>{setProfiles(p);setStep(2);}} onBack={()=>setStep(0)}/>}
+      {step===2&&<StepTest onNext={t=>{setTestConfig(t);setStep(3);}} onBack={()=>setStep(1)}/>}
+      {step===3&&<StepSim profiles={profiles} test={testConfig} input={dataInput} apiKey={apiKey} onNext={r=>{setResults(r);setStep(4);}} onBack={()=>setStep(2)}/>}
+      {step===4&&<StepResultados results={results} test={testConfig}/>}
+    </div>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
