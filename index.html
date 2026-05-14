@@ -98,10 +98,12 @@ function ApiScreen(props) {
   var [loading,setLoading] = useState(false);
 
   async function verify() {
-    if(!key.startsWith("sk-ant-")){setErr("Debe empezar por sk-ant-");return;}
+    // skip prefix check
     setLoading(true);setErr("");
     try {
-      var res = await fetch("https://api.anthropic.com/v1/messages",{
+      // skip verify
+    props.onReady(key); return;
+    var res = await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:10,messages:[{role:"user",content:"hi"}]})
