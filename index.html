@@ -98,18 +98,9 @@ function ApiScreen(props) {
   var [loading,setLoading] = useState(false);
 
   async function verify() {
-    // skip prefix check
     setLoading(true);setErr("");
     try {
-      // skip verify
-    props.onReady(key); return;
-    var res = await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:10,messages:[{role:"user",content:"hi"}]})
-      });
-      if(res.ok) props.onReady(key);
-      else setErr("Clave invalida. Compruebala en console.anthropic.com");
+      props.onReady(key); return;
     } catch(e) { setErr("Error de conexion."); }
     setLoading(false);
   }
@@ -132,12 +123,28 @@ function ApiScreen(props) {
   );
 }
 
+// Sectores disponibles — añadido "turismo"
+const SECTORES = [
+  { value:"moda",        label:"Moda" },
+  { value:"hogar",       label:"Hogar" },
+  { value:"electronica", label:"Electrónica" },
+  { value:"belleza",     label:"Belleza" },
+  { value:"alimentacion",label:"Alimentación" },
+  { value:"deporte",     label:"Deporte" },
+  { value:"turismo",     label:"Turismo ✈️" },
+];
+
+// Datos de ejemplo específicos por sector
+const EJEMPLOS = {
+  turismo: "edad,genero,dispositivo,ciudad,canal,tipo_viaje,cvr\n18-24,mujer,mobile,Madrid,Instagram,vacaciones,0.021\n25-34,pareja,mobile,Barcelona,Google Ads,luna_de_miel,0.038\n25-34,hombre,desktop,Madrid,Organico,negocios,0.045\n35-44,familia,desktop,Valencia,Email,vacaciones,0.062\n45-54,mujer,desktop,Sevilla,Email,cultural,0.057\n55+,pareja,desktop,Bilbao,Directo,relax,0.031",
+  default: "edad,genero,dispositivo,ciudad,canal,cvr\n18-24,mujer,mobile,Madrid,Instagram,0.028\n25-34,mujer,mobile,Madrid,Organico,0.041\n25-34,hombre,desktop,Barcelona,Google Ads,0.038\n35-44,mujer,desktop,Valencia,Email,0.058\n45-54,mujer,desktop,Sevilla,Email,0.061\n55+,hombre,desktop,Madrid,Directo,0.021"
+};
+
 function StepData(props) {
   var [drag,setDrag] = useState(false);
   var [content,setContent] = useState("");
   var [name,setName] = useState("");
   var [sector,setSector] = useState("moda");
-   var [sector,setSector] = useState("turismo");
   var [mode,setMode] = useState("upload");
   var [manual,setManual] = useState("");
   var ref = useRef();
@@ -151,8 +158,9 @@ function StepData(props) {
   }
 
   function ejemplo() {
-    setContent("edad,genero,dispositivo,ciudad,canal,cvr\n18-24,mujer,mobile,Madrid,Instagram,0.028\n25-34,mujer,mobile,Madrid,Organico,0.041\n25-34,hombre,desktop,Barcelona,Google Ads,0.038\n35-44,mujer,desktop,Valencia,Email,0.058\n45-54,mujer,desktop,Sevilla,Email,0.061\n55+,hombre,desktop,Madrid,Directo,0.021");
-    setName("datos_ejemplo.csv");
+    var data = EJEMPLOS[sector] || EJEMPLOS.default;
+    setContent(data);
+    setName("datos_ejemplo_"+sector+".csv");
   }
 
   var ok = content||manual;
@@ -163,8 +171,13 @@ function StepData(props) {
       <div style={s.card}>
         <label style={s.label}>Sector</label>
         <select style={s.sel} value={sector} onChange={e=>setSector(e.target.value)}>
-          <option>moda</option><option>hogar</option><option>electronica</option><option>belleza</option><option>alimentacion</option><option>deporte</option>
+          {SECTORES.map(function(sec){ return <option key={sec.value} value={sec.value}>{sec.label}</option>; })}
         </select>
+        {sector==="turismo" && (
+          <div style={{marginTop:"10px",padding:"9px 12px",background:"#0D1A2E",border:"1px solid rgba(0,180,255,0.15)",borderRadius:"8px",fontSize:"12px",color:"#6BBFFF",lineHeight:"1.6"}}>
+            ✈️ Sector turismo: los perfiles incluirán tipo de viaje, motivación y comportamiento de reserva online.
+          </div>
+        )}
       </div>
       <div style={s.card}>
         <div style={{display:"flex",gap:"8px",marginBottom:"12px"}}>
@@ -177,9 +190,9 @@ function StepData(props) {
               <div style={{fontSize:"22px",marginBottom:"7px"}}>📂</div>
               {name?<p style={{color:ACCENT2,fontWeight:"600",fontSize:"13px"}}>{name}</p>:<p style={{fontSize:"13px",color:"#6B6B9A"}}>Arrastra CSV o haz clic</p>}
             </div>
-          : <textarea style={{...s.ta,minHeight:"100px"}} value={manual} onChange={e=>setManual(e.target.value)} placeholder="edad,genero,dispositivo,ciudad,canal,cvr"/>
+          : <textarea style={{...s.ta,minHeight:"100px"}} value={manual} onChange={e=>setManual(e.target.value)} placeholder={sector==="turismo"?"edad,genero,dispositivo,ciudad,canal,tipo_viaje,cvr":"edad,genero,dispositivo,ciudad,canal,cvr"}/>
         }
-        <button onClick={ejemplo} style={{...s.btnO,marginTop:"10px",fontSize:"12px",padding:"6px 12px"}}>Usar datos de ejemplo</button>
+        <button onClick={ejemplo} style={{...s.btnO,marginTop:"10px",fontSize:"12px",padding:"6px 12px"}}>Usar datos de ejemplo {sector==="turismo"?"✈️":""}</button>
       </div>
       <div style={s.btnRow}>
         <button style={{...s.btn,opacity:ok?1:0.4}} disabled={!ok} onClick={()=>props.onNext({data:content||manual,sector:sector})}>Generar perfiles</button>
@@ -194,10 +207,15 @@ function StepPerfiles(props) {
   var [n,setN] = useState(20);
   var [err,setErr] = useState("");
 
+  var esTurismo = props.input.sector === "turismo";
+
   async function generar() {
     setLoading(true);setErr("");
     try {
-      var prompt = "Analiza estos datos de un ecommerce de "+props.input.sector+":\n\n"+props.input.data+"\n\nGenera exactamente "+n+" perfiles sinteticos que respeten las distribuciones. Devuelve SOLO un array JSON con campos: id, edad, genero, ciudad, dispositivo, madurez(1-5), canal, tipo(nuevo/recurrente), prob_conversion(0.01-0.12), initials(2 letras mayusculas). Ejemplo: [{\"id\":\"001\",\"edad\":\"25-34\",\"genero\":\"mujer\",\"ciudad\":\"Madrid\",\"dispositivo\":\"mobile\",\"madurez\":4,\"canal\":\"Instagram\",\"tipo\":\"recurrente\",\"prob_conversion\":0.041,\"initials\":\"MG\"}]";
+      var extraTurismo = esTurismo
+        ? " Incluye campos adicionales: tipo_viaje(vacaciones/negocios/luna_de_miel/cultural/relax/aventura), motivacion(precio/experiencia/comodidad/exclusividad), antelacion_reserva(dias 1-180)."
+        : "";
+      var prompt = "Analiza estos datos de un ecommerce de "+props.input.sector+":\n\n"+props.input.data+"\n\nGenera exactamente "+n+" perfiles sinteticos que respeten las distribuciones."+extraTurismo+" Devuelve SOLO un array JSON con campos: id, edad, genero, ciudad, dispositivo, madurez(1-5), canal, tipo(nuevo/recurrente), prob_conversion(0.01-0.12), initials(2 letras mayusculas)"+(esTurismo?", tipo_viaje, motivacion, antelacion_reserva":"")+". Ejemplo: [{\"id\":\"001\",\"edad\":\"25-34\",\"genero\":\"mujer\",\"ciudad\":\"Madrid\",\"dispositivo\":\"mobile\",\"madurez\":4,\"canal\":\"Instagram\",\"tipo\":\"recurrente\",\"prob_conversion\":0.041,\"initials\":\"MG\""+(esTurismo?",\"tipo_viaje\":\"vacaciones\",\"motivacion\":\"precio\",\"antelacion_reserva\":45":"")+"}]";
       var raw = await callClaude(props.apiKey,[{role:"user",content:prompt}],"Eres experto en analitica web. Responde en español. Devuelve SOLO JSON valido sin texto extra ni markdown.");
       setProfiles(parseJSON(raw));
     } catch(e) { setErr("Error generando perfiles: "+e.message); }
@@ -225,7 +243,13 @@ function StepPerfiles(props) {
               <span style={s.tag(p.prob_conversion>0.05?"green":"amber")}>CVR {(p.prob_conversion*100).toFixed(1)}%</span>
             </div>
             <div style={s.attrG}>
-              {[["Ciudad",p.ciudad],["Dispositivo",p.dispositivo],["Canal",p.canal],["Madurez",p.madurez+"/5"]].map(function(kv){return(
+              {[
+                ["Ciudad",p.ciudad],
+                ["Dispositivo",p.dispositivo],
+                ["Canal",p.canal],
+                ["Madurez",p.madurez+"/5"],
+                ...(esTurismo && p.tipo_viaje ? [["Viaje",p.tipo_viaje],["Motiv.",p.motivacion]] : [])
+              ].map(function(kv){return(
                 <div key={kv[0]} style={s.attr}>
                   <div style={{fontSize:"10px",color:"#4A4A6A"}}>{kv[0]}</div>
                   <div style={{fontSize:"12px",color:"#C8C6FF",fontWeight:"500"}}>{kv[1]}</div>
@@ -246,7 +270,7 @@ function StepPerfiles(props) {
   return (
     <div>
       <p style={s.title}>Perfiles sinteticos</p>
-      <p style={s.sub}>La IA crea usuarios que respetan las distribuciones reales.</p>
+      <p style={s.sub}>La IA crea usuarios que respetan las distribuciones reales.{esTurismo?" Los perfiles de turismo incluyen tipo de viaje, motivación y antelación de reserva.":""}</p>
       <div style={s.card}>
         <label style={s.label}>Numero de perfiles</label>
         <select style={s.sel} value={n} onChange={e=>setN(Number(e.target.value))}>
@@ -273,36 +297,46 @@ function StepTest(props) {
   var [split,setSplit] = useState(50);
   var ok = varA&&varB&&hip;
 
+  var esTurismo = props.sector === "turismo";
+
+  var paginas = esTurismo
+    ? ["ficha de hotel","ficha de vuelo","pagina de paquete turistico","homepage","resultados de busqueda","checkout / pago","pagina de destino"]
+    : ["pagina de producto","homepage","checkout","categoria","carrito"];
+
+  var metricas = esTurismo
+    ? ["tasa de conversion","clics en CTA","tasa de rebote","tiempo en pagina","inicios de reserva","completacion de reserva"]
+    : ["tasa de conversion","clics en CTA","tasa de rebote","tiempo en pagina"];
+
   return (
     <div>
       <p style={s.title}>Configurar test A/B</p>
       <p style={s.sub}>Define la hipotesis y las dos variantes.</p>
       <div style={s.card}>
         <label style={s.label}>Hipotesis</label>
-        <textarea style={s.ta} value={hip} onChange={e=>setHip(e.target.value)} placeholder="Creemos que [cambio] aumentara [metrica] porque [razon]..."/>
+        <textarea style={s.ta} value={hip} onChange={e=>setHip(e.target.value)} placeholder={esTurismo?"Creemos que [cambio] aumentara [metrica] porque los viajeros [razon]...":"Creemos que [cambio] aumentara [metrica] porque [razon]..."}/>
       </div>
       <div style={s.card}>
         <label style={s.label}>Pagina testada</label>
         <select style={s.sel} value={pag} onChange={e=>setPag(e.target.value)}>
-          <option>pagina de producto</option><option>homepage</option><option>checkout</option><option>categoria</option><option>carrito</option>
+          {paginas.map(function(p){ return <option key={p}>{p}</option>; })}
         </select>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
         <div style={s.card}>
           <div style={{marginBottom:"9px"}}><span style={s.tag("purple")}>Variante A - Control</span></div>
           <label style={s.label}>Descripcion</label>
-          <input style={s.inp} value={varA} onChange={e=>setVarA(e.target.value)} placeholder="Ej: Boton azul Anadir al carrito"/>
+          <input style={s.inp} value={varA} onChange={e=>setVarA(e.target.value)} placeholder={esTurismo?"Ej: Boton Reservar ahora azul":"Ej: Boton azul Anadir al carrito"}/>
         </div>
         <div style={s.card}>
           <div style={{marginBottom:"9px"}}><span style={s.tag("green")}>Variante B - Cambio</span></div>
           <label style={s.label}>Descripcion</label>
-          <input style={s.inp} value={varB} onChange={e=>setVarB(e.target.value)} placeholder="Ej: Boton verde Comprar ahora"/>
+          <input style={s.inp} value={varB} onChange={e=>setVarB(e.target.value)} placeholder={esTurismo?"Ej: Boton Ver disponibilidad verde con urgencia":"Ej: Boton verde Comprar ahora"}/>
         </div>
       </div>
       <div style={s.card}>
         <label style={s.label}>Metrica principal</label>
         <select style={s.sel} value={met} onChange={e=>setMet(e.target.value)}>
-          <option>tasa de conversion</option><option>clics en CTA</option><option>tasa de rebote</option><option>tiempo en pagina</option>
+          {metricas.map(function(m){ return <option key={m}>{m}</option>; })}
         </select>
         <div style={{marginTop:"12px"}}>
           <label style={s.label}>Split: A {split}% / B {100-split}%</label>
@@ -323,11 +357,18 @@ function StepSim(props) {
   var [res,setRes] = useState(null);
   var [err,setErr] = useState("");
 
+  var esTurismo = props.input.sector === "turismo";
+
   async function simular() {
     setLoading(true);setErr("");
     try {
-      var sample = props.profiles.slice(0,15).map(function(p){return {id:p.id,edad:p.edad,genero:p.genero,dispositivo:p.dispositivo,madurez:p.madurez,canal:p.canal,prob_conversion:p.prob_conversion};});
-      var prompt = "Simula test A/B sobre "+sample.length+" perfiles de ecommerce de "+props.input.sector+". HIPOTESIS: "+props.test.hipotesis+". PAGINA: "+props.test.pagina+". VARIANTE A: "+props.test.varA+". VARIANTE B: "+props.test.varB+". METRICA: "+props.test.metrica+". SPLIT: "+props.test.split+"% A / "+(100-props.test.split)+"% B. PERFILES: "+JSON.stringify(sample)+". Devuelve SOLO este JSON: {\"ganador\":\"B\",\"confianza\":94,\"uplift_cvr\":11.4,\"cvr_a\":3.4,\"cvr_b\":3.8,\"clics_cta_a\":14,\"clics_cta_b\":18,\"rebote_a\":44,\"rebote_b\":41,\"segmentos\":[{\"nombre\":\"18-24\",\"resultado\":\"B gana\",\"diff_pct\":22}],\"razones_abandono\":[\"razon 1\",\"razon 2\"],\"insights\":[\"insight 1\",\"insight 2\"],\"recomendacion\":\"texto\"}";
+      var sample = props.profiles.slice(0,15).map(function(p){
+        var base = {id:p.id,edad:p.edad,genero:p.genero,dispositivo:p.dispositivo,madurez:p.madurez,canal:p.canal,prob_conversion:p.prob_conversion};
+        if(esTurismo) { base.tipo_viaje=p.tipo_viaje; base.motivacion=p.motivacion; base.antelacion_reserva=p.antelacion_reserva; }
+        return base;
+      });
+      var extraTurismo = esTurismo ? " Ten en cuenta el tipo de viaje, motivacion y antelacion de reserva de cada perfil para determinar como reaccionan a cada variante." : "";
+      var prompt = "Simula test A/B sobre "+sample.length+" perfiles de ecommerce de "+props.input.sector+". HIPOTESIS: "+props.test.hipotesis+". PAGINA: "+props.test.pagina+". VARIANTE A: "+props.test.varA+". VARIANTE B: "+props.test.varB+". METRICA: "+props.test.metrica+". SPLIT: "+props.test.split+"% A / "+(100-props.test.split)+"% B. PERFILES: "+JSON.stringify(sample)+"."+extraTurismo+" Devuelve SOLO este JSON: {\"ganador\":\"B\",\"confianza\":94,\"uplift_cvr\":11.4,\"cvr_a\":3.4,\"cvr_b\":3.8,\"clics_cta_a\":14,\"clics_cta_b\":18,\"rebote_a\":44,\"rebote_b\":41,\"segmentos\":[{\"nombre\":\"18-24\",\"resultado\":\"B gana\",\"diff_pct\":22}],\"razones_abandono\":[\"razon 1\",\"razon 2\"],\"insights\":[\"insight 1\",\"insight 2\"],\"recomendacion\":\"texto\"}";
       var raw = await callClaude(props.apiKey,[{role:"user",content:prompt}],"Eres motor de simulacion A/B. Responde en espanol. SOLO JSON valido.");
       setRes(parseJSON(raw));setDone(true);
     } catch(e) { setErr("Error en simulacion: "+e.message); }
@@ -493,7 +534,7 @@ function App() {
       <div style={s.main}>
         {step===0&&<StepData onNext={function(d){setDataInput(d);setStep(1);}}/>}
         {step===1&&<StepPerfiles input={dataInput} apiKey={apiKey} onNext={function(p){setProfiles(p);setStep(2);}} onBack={()=>setStep(0)}/>}
-        {step===2&&<StepTest onNext={function(t){setTestConfig(t);setStep(3);}} onBack={()=>setStep(1)}/>}
+        {step===2&&<StepTest sector={dataInput&&dataInput.sector} onNext={function(t){setTestConfig(t);setStep(3);}} onBack={()=>setStep(1)}/>}
         {step===3&&<StepSim profiles={profiles} test={testConfig} input={dataInput} apiKey={apiKey} onNext={function(r){setResults(r);setStep(4);}} onBack={()=>setStep(2)}/>}
         {step===4&&<StepResultados results={results} test={testConfig}/>}
       </div>
