@@ -1,845 +1,1388 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SynthAB</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { background:#0A0A0F; color:#E8E6FF; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
-    input,select,textarea,button { font-family:inherit; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-    .prompt-box { background:#070710; border:1px solid #1A1A30; border-radius:8px; padding:12px 14px; font-family:monospace; font-size:11px; color:#8B88CC; line-height:1.8; white-space:pre-wrap; word-break:break-word; max-height:200px; overflow-y:auto; }
-    .prompt-var { color:#00D4AA; }
-    .prompt-key { color:#6C63FF; }
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>SynthAB</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#08080F;color:#E2E0FF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+input,select,textarea,button{font-family:inherit}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fade{animation:fadeIn 0.25s ease}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:#0D0D1A}
+::-webkit-scrollbar-thumb{background:#2A2A3E;border-radius:2px}
+</style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useRef } = React;
-const ACCENT = "#6C63FF";
-const ACCENT2 = "#00D4AA";
-const STEPS = ["Datos","Perfiles","Test A/B","Simulación","Resultados"];
-const AVATARS = ["#6C63FF","#00D4AA","#FF6B9D","#F5A623","#4ECDC4"];
+const {useState,useRef,useEffect}=React;
 
-const s = {
-  header: { borderBottom:"1px solid #1E1E2E", padding:"16px 28px", display:"flex", alignItems:"center", justifyContent:"space-between", background:"#0D0D14" },
-  logo: { fontSize:"15px", fontWeight:"600", color:"#fff", display:"flex", alignItems:"center", gap:"8px" },
-  dot: { width:"8px", height:"8px", borderRadius:"50%", background:ACCENT2 },
-  stepBar: { display:"flex", background:"#0D0D14", borderBottom:"1px solid #1E1E2E", overflowX:"auto" },
-  main: { maxWidth:"700px", margin:"0 auto", padding:"36px 20px" },
-  card: { background:"#13131F", border:"1px solid #1E1E2E", borderRadius:"12px", padding:"18px 20px", marginBottom:"12px" },
-  title: { fontSize:"21px", fontWeight:"600", color:"#fff", margin:"0 0 5px" },
-  sub: { fontSize:"13px", color:"#6B6B9A", margin:"0 0 24px", lineHeight:"1.6" },
-  label: { fontSize:"12px", color:"#6B6B9A", marginBottom:"5px", display:"block", fontWeight:"500" },
-  inp: { width:"100%", background:"#0A0A14", border:"1px solid #2A2A3E", borderRadius:"8px", padding:"9px 11px", color:"#E8E6FF", fontSize:"13px", outline:"none", boxSizing:"border-box" },
-  ta: { width:"100%", background:"#0A0A14", border:"1px solid #2A2A3E", borderRadius:"8px", padding:"9px 11px", color:"#E8E6FF", fontSize:"13px", outline:"none", boxSizing:"border-box", resize:"vertical", minHeight:"75px" },
-  sel: { width:"100%", background:"#0A0A14", border:"1px solid #2A2A3E", borderRadius:"8px", padding:"9px 11px", color:"#E8E6FF", fontSize:"13px", outline:"none", boxSizing:"border-box" },
-  btn: { background:ACCENT, color:"#fff", border:"none", borderRadius:"8px", padding:"10px 20px", fontSize:"13px", fontWeight:"600", cursor:"pointer" },
-  btnG: { background:ACCENT2, color:"#000", border:"none", borderRadius:"8px", padding:"10px 20px", fontSize:"13px", fontWeight:"600", cursor:"pointer" },
-  btnO: { background:"transparent", color:"#8B8BCC", border:"1px solid #2A2A3E", borderRadius:"8px", padding:"9px 16px", fontSize:"13px", cursor:"pointer" },
-  btnRow: { display:"flex", justifyContent:"flex-end", gap:"10px", marginTop:"20px" },
-  spin: { width:"30px", height:"30px", border:"3px solid #1E1E2E", borderTop:"3px solid "+ACCENT, borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto 12px" },
-  pCard: { background:"#0D0D18", border:"1px solid #1E1E2E", borderRadius:"10px", padding:"12px 14px", marginBottom:"8px" },
-  attrG: { display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"5px" },
-  attr: { background:"#13131F", borderRadius:"6px", padding:"4px 7px" },
-  mRow: { display:"flex", alignItems:"center", gap:"10px", padding:"8px 0", borderBottom:"1px solid #1A1A2E" },
-  iRow: { display:"flex", gap:"8px", alignItems:"flex-start", padding:"7px 0", borderBottom:"1px solid #1A1A2E", fontSize:"13px", color:"#9B99CC", lineHeight:"1.6" },
-  sRow: { display:"flex", alignItems:"center", gap:"8px", padding:"7px 0", borderBottom:"1px solid #1A1A2E", fontSize:"12px", color:"#9B99CC" },
-  winner: { background:"#0A1A14", border:"1px solid rgba(0,212,170,0.2)", borderRadius:"12px", padding:"18px 20px", marginBottom:"18px", display:"flex", alignItems:"center", gap:"14px" },
-  tag: function(c) { return { fontSize:"11px", fontWeight:"600", padding:"2px 8px", borderRadius:"20px", background:c==="green"?"#0D2E22":c==="amber"?"#2E1E05":c==="purple"?"#1A1535":"#1E1E2E", color:c==="green"?ACCENT2:c==="amber"?"#F5A623":c==="purple"?ACCENT:"#6B6B9A" }; },
-  av: function(c) { return { width:"30px", height:"30px", borderRadius:"50%", background:c, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"10px", fontWeight:"700", color:"#fff", flexShrink:0 }; },
-  upload: function(d) { return { border:"1.5px dashed "+(d?ACCENT2:"#2A2A3E"), borderRadius:"10px", padding:"24px", textAlign:"center", cursor:"pointer", background:d?"#0D1F1C":"#0A0A14" }; },
-  promptToggle: { fontSize:"11px", color:"#4A4A6A", cursor:"pointer", display:"flex", alignItems:"center", gap:"5px", padding:"4px 0", userSelect:"none" },
-  infoBox: { background:"#0D1220", border:"1px solid #1A2545", borderRadius:"8px", padding:"10px 13px", fontSize:"12px", color:"#6B8BCC", lineHeight:"1.6", marginTop:"8px" }
+// ── TOKENS ──────────────────────────────────────────────────────────────
+const C={
+  bg:'#08080F',bgCard:'#0F0F1C',bgHover:'#13132A',
+  border:'#1C1C30',borderHi:'#2A2A45',
+  accent:'#6C63FF',accentDim:'rgba(108,99,255,0.12)',
+  green:'#00D4AA',greenDim:'rgba(0,212,170,0.1)',
+  amber:'#F5A623',amberDim:'rgba(245,166,35,0.1)',
+  red:'#FF5C5C',redDim:'rgba(255,92,92,0.1)',
+  blue:'#4B9EFF',blueDim:'rgba(75,158,255,0.1)',
+  txt:'#E2E0FF',txtMid:'#8A88BB',txtDim:'#4A4870',
+  white:'#fff',
 };
 
-function Spinner({text, sub}) {
-  return (
-    <div style={{textAlign:"center",padding:"48px 20px"}}>
-      <div style={s.spin}/>
-      <p style={{color:"#C8C6FF",fontSize:"14px",fontWeight:"500",marginBottom:"5px"}}>{text}</p>
-      {sub && <p style={{color:"#4A4A6A",fontSize:"12px"}}>{sub}</p>}
-    </div>
-  );
-}
+const T={
+  h1:{fontSize:'22px',fontWeight:600,color:C.white,lineHeight:1.3},
+  h2:{fontSize:'17px',fontWeight:600,color:C.white},
+  h3:{fontSize:'14px',fontWeight:600,color:C.txt},
+  body:{fontSize:'13px',color:C.txtMid,lineHeight:1.6},
+  small:{fontSize:'11px',color:C.txtDim,lineHeight:1.5},
+  label:{fontSize:'11px',fontWeight:600,color:C.txtDim,textTransform:'uppercase',letterSpacing:'0.06em'},
+  mono:{fontFamily:'monospace',fontSize:'12px',color:C.green},
+};
 
-function StepBar({cur}) {
-  return (
-    <div style={s.stepBar}>
-      {STEPS.map(function(st, i) {
-        return (
-          <div key={st} style={{padding:"12px 16px",fontSize:"12px",fontWeight:"500",
-            color:i<cur?ACCENT2:i===cur?"#fff":"#4A4A6A",
-            borderBottom:i===cur?"2px solid "+ACCENT:"2px solid transparent",
-            whiteSpace:"nowrap"}}>
-            {i<cur?"✓ ":""}
-            {i+1}. {st}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+// ── SHARED COMPONENTS ────────────────────────────────────────────────────
+const Card=({children,style,onClick})=>(
+  <div onClick={onClick} style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:'12px',padding:'16px 18px',...style}}>
+    {children}
+  </div>
+);
 
-function PromptViewer({title, prompt}) {
-  const [open, setOpen] = useState(false);
-  const highlighted = prompt
-    .replace(/\{\{[^}]+\}\}/g, m => `<span class="prompt-var">${m}</span>`)
-    .replace(/\[(SECTOR|URL|VARIANTE|DATOS|PERFILES|CVR)[^\]]*\]/g, m => `<span class="prompt-key">${m}</span>`);
-  return (
-    <div style={{marginTop:"10px"}}>
-      <div style={s.promptToggle} onClick={()=>setOpen(!open)}>
-        <span style={{fontSize:"9px"}}>{open?"▼":"▶"}</span>
-        <span>Ver prompt de IA — {title}</span>
+const Btn=({children,onClick,variant='primary',disabled,style,small})=>{
+  const base={border:'none',borderRadius:'8px',cursor:disabled?'not-allowed':'pointer',fontWeight:600,opacity:disabled?0.4:1,transition:'opacity 0.15s',...style};
+  const pad=small?{padding:'6px 12px',fontSize:'12px'}:{padding:'10px 18px',fontSize:'13px'};
+  const vars={
+    primary:{...base,...pad,background:C.accent,color:'#fff'},
+    ghost:{...base,...pad,background:'transparent',color:C.txtMid,border:`1px solid ${C.border}`},
+    green:{...base,...pad,background:C.green,color:'#000'},
+    danger:{...base,...pad,background:C.red,color:'#fff'},
+  };
+  return <button style={vars[variant]} onClick={disabled?null:onClick}>{children}</button>;
+};
+
+const Input=({label,value,onChange,placeholder,type='text',hint,required,style})=>(
+  <div style={{marginBottom:'14px',...style}}>
+    {label&&<label style={{...T.label,display:'block',marginBottom:'5px'}}>{label}{required&&<span style={{color:C.red}}> *</span>}</label>}
+    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+      style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
+    {hint&&<p style={{...T.small,marginTop:'4px'}}>{hint}</p>}
+  </div>
+);
+
+const Select=({label,value,onChange,options,required})=>(
+  <div style={{marginBottom:'14px'}}>
+    {label&&<label style={{...T.label,display:'block',marginBottom:'5px'}}>{label}{required&&<span style={{color:C.red}}> *</span>}</label>}
+    <select value={value} onChange={e=>onChange(e.target.value)}
+      style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
+      {options.map(o=><option key={o.value||o} value={o.value||o}>{o.label||o}</option>)}
+    </select>
+  </div>
+);
+
+const Tag=({children,color='default'})=>{
+  const map={default:{bg:C.border,col:C.txtMid},green:{bg:C.greenDim,col:C.green},amber:{bg:C.amberDim,col:C.amber},red:{bg:C.redDim,col:C.red},blue:{bg:C.blueDim,col:C.blue},purple:{bg:C.accentDim,col:C.accent}};
+  const m=map[color]||map.default;
+  return <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'20px',background:m.bg,color:m.col}}>{children}</span>;
+};
+
+const Spinner=({text,sub})=>(
+  <div style={{textAlign:'center',padding:'56px 20px'}}>
+    <div style={{width:'32px',height:'32px',border:`3px solid ${C.border}`,borderTop:`3px solid ${C.accent}`,borderRadius:'50%',animation:'spin 0.8s linear infinite',margin:'0 auto 14px'}}/>
+    <p style={{...T.h3,marginBottom:'5px'}}>{text}</p>
+    {sub&&<p style={T.body}>{sub}</p>}
+  </div>
+);
+
+const QualityBar=({score})=>{
+  const col=score>=80?C.green:score>=55?C.amber:C.red;
+  const lbl=score>=80?'Alta precisión':score>=55?'Precisión media':'Precisión básica';
+  const next=score<55?'Sube los CSV de GA4 para mejorar la precisión':score<80?'Añade Exp2 y Exp3 para llegar al 90%':'Datos completos';
+  return(
+    <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'10px',padding:'14px 16px',marginBottom:'18px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px'}}>
+        <span style={{...T.label}}>Calidad de los perfiles sintéticos</span>
+        <span style={{fontSize:'20px',fontWeight:700,color:col}}>{score}%</span>
       </div>
-      {open && (
-        <div style={{marginTop:"6px"}}>
-          <div className="prompt-box" dangerouslySetInnerHTML={{__html:highlighted}}/>
-          <p style={{fontSize:"10px",color:"#2A2A4A",marginTop:"4px"}}>Las variables en <span style={{color:ACCENT2}}>verde</span> se rellenan automáticamente con los datos del cliente.</p>
+      <div style={{background:'#14142A',borderRadius:'20px',height:'5px',marginBottom:'7px'}}>
+        <div style={{width:score+'%',height:'100%',borderRadius:'20px',background:col,transition:'width 0.6s'}}/>
+      </div>
+      <div style={{display:'flex',justifyContent:'space-between'}}>
+        <span style={{fontSize:'11px',color:col,fontWeight:600}}>{lbl}</span>
+        {score<90&&<span style={T.small}>↑ {next}</span>}
+      </div>
+    </div>
+  );
+};
+
+// ── PILOT DATA ────────────────────────────────────────────────────────────
+const PILOT_PROJECT={
+  id:'p1',
+  name:'Moda Urban — Piloto',
+  domain:'modaurban.es',
+  sector:'moda',
+  createdAt:'2026-05-10',
+  quality:72,
+  kpis:{cvr:'2.4',ticket:'68',transacciones:'320',trafico:'45000',mobile:65,tipoCompra:'mixta',recurrentes:28},
+  canales:[{canal:'Orgánico / SEO',pct:'38'},{canal:'Google Ads',pct:'28'},{canal:'Meta Ads',pct:'22'},{canal:'Email',pct:'12'}],
+  exp1:true, exp2:true, exp3:false,
+  tests:[
+    {id:'t1',name:'CTA página de producto',url:'https://modaurban.es/producto/cazadora-oversize',status:'completado',ganador:'B',uplift:'+11.4%',createdAt:'2026-05-15'},
+    {id:'t2',name:'Banner hero homepage',url:'https://modaurban.es',status:'en curso',ganador:null,uplift:null,createdAt:'2026-05-28'},
+  ]
+};
+
+const PILOT_RESULTS={
+  t1:{ganador:'B',confianza:94,uplift_cvr:11.4,cvr_a:2.4,cvr_b:2.67,clics_cta_a:14,clics_cta_b:18,rebote_a:44,rebote_b:40,
+    segmentos:[{nombre:'18-24',resultado:'B gana fuerte',diff_pct:28},{nombre:'25-34',resultado:'B gana',diff_pct:18},{nombre:'35-44',resultado:'B gana leve',diff_pct:7},{nombre:'45-54',resultado:'A gana leve',diff_pct:-6},{nombre:'55+',resultado:'A gana',diff_pct:-14}],
+    razones_abandono:['El CTA verde genera urgencia excesiva en usuarios mayores de 45','El texto "Comprar ahora" presiona a perfiles de baja madurez digital','En desktop el botón queda fuera del área de scroll inicial'],
+    insights:['B mejora significativamente en mobile jóvenes (18-34). Si el tráfico mobile supera el 60%, el efecto global es positivo.','El segmento 45+ responde peor a B. Considera una variante C más neutra para ese segmento.','El AOV no varía — B atrae más compradores pero no cambia el ticket.'],
+    recomendacion:'Implementa variante B para usuarios mobile menores de 45 años (61% del tráfico). Mantén A para usuarios 45+ y desktop hasta validar con tráfico real. Uplift estimado sobre tráfico total: +6.8% de conversión.'},
+};
+
+// ── CLAUDE API ────────────────────────────────────────────────────────────
+async function callClaude(apiKey,messages,system){
+  const res=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:2500,system,messages})
+  });
+  const data=await res.json();
+  if(!data.content) throw new Error(data.error?data.error.message:'Error API');
+  return data.content.map(b=>b.text||'').join('');
+}
+function parseJSON(raw){
+  const c=raw.replace(/```json/g,'').replace(/```/g,'').trim();
+  const s1=c.indexOf('['),s2=c.indexOf('{');
+  if(s1!==-1&&(s2===-1||s1<s2)) return JSON.parse(c.slice(s1,c.lastIndexOf(']')+1));
+  return JSON.parse(c.slice(s2,c.lastIndexOf('}')+1));
+}
+function parseCSV(text){
+  const clean=text.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
+  const lines=clean.split('\n').filter(l=>l.trim());
+  if(lines.length<2) return null;
+  const sep=lines[0].includes(';')?';':',';
+  const headers=lines[0].split(sep).map(h=>h.trim().replace(/"/g,''));
+  const rows=lines.slice(1).map(line=>{const vals=line.split(sep).map(v=>v.trim().replace(/"/g,''));const obj={};headers.forEach((h,i)=>{obj[h]=vals[i]||'';});return obj;});
+  return{headers,rows,raw:clean};
+}
+
+// ── NAV ───────────────────────────────────────────────────────────────────
+const NAV_ITEMS=[{id:'projects',icon:'◈',label:'Proyectos'},{id:'reports',icon:'◎',label:'Reportes'},{id:'settings',icon:'◉',label:'Ajustes'}];
+
+function Sidebar({active,onNav,apiKey,onLogout}){
+  return(
+    <div style={{width:'200px',flexShrink:0,background:'#0A0A16',borderRight:`1px solid ${C.border}`,display:'flex',flexDirection:'column',minHeight:'100vh'}}>
+      <div style={{padding:'20px 16px',borderBottom:`1px solid ${C.border}`}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+          <div style={{width:'28px',height:'28px',borderRadius:'7px',background:C.accent,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'14px'}}>⬡</div>
+          <span style={{fontSize:'14px',fontWeight:700,color:C.white}}>SynthAB</span>
+        </div>
+        <span style={{fontSize:'10px',color:C.txtDim,marginLeft:'36px'}}>v0.4 · piloto</span>
+      </div>
+      <nav style={{flex:1,padding:'12px 8px'}}>
+        {NAV_ITEMS.map(item=>(
+          <div key={item.id} onClick={()=>onNav(item.id)}
+            style={{display:'flex',alignItems:'center',gap:'10px',padding:'9px 10px',borderRadius:'8px',cursor:'pointer',marginBottom:'2px',
+              background:active===item.id?C.accentDim:'transparent',
+              color:active===item.id?C.accent:C.txtMid,fontSize:'13px',fontWeight:active===item.id?600:400}}>
+            <span style={{fontSize:'15px'}}>{item.icon}</span>{item.label}
+          </div>
+        ))}
+      </nav>
+      <div style={{padding:'12px 16px',borderTop:`1px solid ${C.border}`}}>
+        <p style={{...T.small,marginBottom:'4px'}}>API conectada</p>
+        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+          <div style={{width:'6px',height:'6px',borderRadius:'50%',background:C.green}}/>
+          <span style={{fontSize:'11px',color:C.green,fontFamily:'monospace'}}>{apiKey.slice(0,12)}...</span>
+        </div>
+        <button onClick={onLogout} style={{marginTop:'8px',fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer',padding:0}}>Cambiar clave</button>
+      </div>
+    </div>
+  );
+}
+
+// ── PROJECTS LIST ─────────────────────────────────────────────────────────
+function ProjectsList({projects,onSelect,onCreate}){
+  const statusTests=(p)=>p.tests.filter(t=>t.status==='completado').length;
+  return(
+    <div className="fade" style={{padding:'28px 32px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'24px'}}>
+        <div>
+          <h1 style={T.h1}>Proyectos</h1>
+          <p style={{...T.body,marginTop:'3px'}}>{projects.length} proyecto{projects.length!==1?'s':''} activo{projects.length!==1?'s':''}</p>
+        </div>
+        <Btn onClick={onCreate}>+ Nuevo proyecto</Btn>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'14px'}}>
+        {projects.map(p=>(
+          <Card key={p.id} onClick={()=>onSelect(p)} style={{cursor:'pointer',transition:'border-color 0.15s',':hover':{borderColor:C.accent}}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'12px'}}>
+              <div style={{width:'36px',height:'36px',borderRadius:'9px',background:C.accentDim,border:`1px solid ${C.accent}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'16px'}}>◈</div>
+              <Tag color={p.quality>=80?'green':p.quality>=55?'amber':'red'}>{p.quality}% precisión</Tag>
+            </div>
+            <h3 style={{...T.h3,marginBottom:'3px'}}>{p.name}</h3>
+            <p style={{...T.mono,marginBottom:'12px'}}>{p.domain}</p>
+            <div style={{display:'flex',gap:'14px',paddingTop:'12px',borderTop:`1px solid ${C.border}`}}>
+              <div style={{textAlign:'center'}}>
+                <div style={{fontSize:'18px',fontWeight:700,color:C.white}}>{p.tests.length}</div>
+                <div style={T.small}>tests</div>
+              </div>
+              <div style={{textAlign:'center'}}>
+                <div style={{fontSize:'18px',fontWeight:700,color:C.green}}>{statusTests(p)}</div>
+                <div style={T.small}>completados</div>
+              </div>
+              <div style={{textAlign:'center'}}>
+                <div style={{fontSize:'18px',fontWeight:700,color:C.accent}}>{p.sector}</div>
+                <div style={T.small}>sector</div>
+              </div>
+            </div>
+          </Card>
+        ))}
+        <div onClick={onCreate} style={{border:`1.5px dashed ${C.border}`,borderRadius:'12px',padding:'16px 18px',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'160px',gap:'8px',color:C.txtDim,transition:'border-color 0.15s'}}>
+          <span style={{fontSize:'28px'}}>+</span>
+          <span style={{fontSize:'13px'}}>Nuevo proyecto</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── PROJECT DETAIL ────────────────────────────────────────────────────────
+function ProjectDetail({project,onBack,onNewTest,onViewTest,onViewReport}){
+  const statusColor={completado:'green',enCurso:'amber','en curso':'amber',borrador:'default'};
+  return(
+    <div className="fade" style={{padding:'28px 32px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'6px'}}>
+        <button onClick={onBack} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px'}}>← Proyectos</button>
+        <span style={{color:C.txtDim}}>/</span>
+        <span style={{fontSize:'13px',color:C.txt}}>{project.name}</span>
+      </div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'24px',flexWrap:'wrap',gap:'12px'}}>
+        <div>
+          <h1 style={T.h1}>{project.name}</h1>
+          <p style={{...T.mono,marginTop:'3px'}}>{project.domain}</p>
+        </div>
+        <div style={{display:'flex',gap:'10px'}}>
+          <Btn variant='ghost' onClick={onViewReport}>Ver reporte</Btn>
+          <Btn onClick={onNewTest}>+ Crear test</Btn>
+        </div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px',marginBottom:'24px'}}>
+        {[
+          {label:'CVR base',val:project.kpis.cvr+'%',col:C.green},
+          {label:'Ticket medio',val:project.kpis.ticket+'€',col:C.white},
+          {label:'Tráfico/mes',val:Number(project.kpis.trafico).toLocaleString(),col:C.white},
+          {label:'Calidad datos',val:project.quality+'%',col:project.quality>=80?C.green:C.amber},
+        ].map(m=>(
+          <Card key={m.label} style={{textAlign:'center'}}>
+            <div style={{fontSize:'22px',fontWeight:700,color:m.col,marginBottom:'3px'}}>{m.val}</div>
+            <div style={T.small}>{m.label}</div>
+          </Card>
+        ))}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px',marginBottom:'24px'}}>
+        <Card>
+          <p style={{...T.label,marginBottom:'12px'}}>Fuentes de datos cargadas</p>
+          {[
+            {label:'Exp 1 — Quién es el usuario',done:project.exp1,req:true},
+            {label:'Exp 2 — Cómo llega',done:project.exp2,req:false},
+            {label:'Exp 3 — Cómo navega',done:project.exp3,req:false},
+          ].map(e=>(
+            <div key={e.label} style={{display:'flex',alignItems:'center',gap:'8px',padding:'7px 0',borderBottom:`1px solid ${C.border}`}}>
+              <span style={{fontSize:'13px',color:e.done?C.green:C.red}}>{e.done?'✓':'○'}</span>
+              <span style={{fontSize:'13px',color:e.done?C.txt:C.txtDim,flex:1}}>{e.label}</span>
+              {e.req&&<Tag color='purple'>Obligatorio</Tag>}
+            </div>
+          ))}
+        </Card>
+        <Card>
+          <p style={{...T.label,marginBottom:'12px'}}>Canales principales</p>
+          {project.canales.filter(c=>c.canal).map((c,i)=>(
+            <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:`1px solid ${C.border}`}}>
+              <span style={{fontSize:'13px',color:C.txt}}>{c.canal}</span>
+              <span style={{fontSize:'13px',fontWeight:600,color:C.accent}}>{c.pct}%</span>
+            </div>
+          ))}
+        </Card>
+      </div>
+      <div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px'}}>
+          <h2 style={T.h2}>Tests</h2>
+          <Btn small onClick={onNewTest}>+ Nuevo test</Btn>
+        </div>
+        {project.tests.length===0
+          ? <Card style={{textAlign:'center',padding:'32px',color:C.txtDim}}>
+              <p style={{fontSize:'32px',marginBottom:'8px'}}>◎</p>
+              <p style={{...T.body}}>Todavía no hay tests en este proyecto.</p>
+              <Btn style={{marginTop:'14px'}} onClick={onNewTest}>Crear primer test</Btn>
+            </Card>
+          : project.tests.map(t=>(
+            <Card key={t.id} style={{marginBottom:'10px',cursor:'pointer'}} onClick={()=>onViewTest(t)}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div style={{flex:1}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
+                    <span style={T.h3}>{t.name}</span>
+                    <Tag color={statusColor[t.status]||'default'}>{t.status}</Tag>
+                  </div>
+                  <p style={{...T.mono,fontSize:'11px'}}>{t.url}</p>
+                </div>
+                {t.ganador&&(
+                  <div style={{textAlign:'right',marginLeft:'16px'}}>
+                    <div style={{fontSize:'18px',fontWeight:700,color:C.green}}>{t.uplift}</div>
+                    <div style={T.small}>Variante {t.ganador} gana</div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── CREATE PROJECT ────────────────────────────────────────────────────────
+const SECTORES=[{value:'moda',label:'Moda'},{value:'hogar',label:'Hogar'},{value:'electronica',label:'Electrónica'},{value:'belleza',label:'Belleza'},{value:'alimentacion',label:'Alimentación'},{value:'deporte',label:'Deporte'},{value:'turismo',label:'Turismo'},{value:'servicios',label:'Servicios / SaaS'}];
+const CANALES_LIST=['Orgánico / SEO','Google Ads','Meta Ads','Email / Newsletter','Directo','Social orgánico','TikTok Ads','Afiliados'];
+
+function CreateProject({onSave,onCancel}){
+  const SUB=['Proyecto','KPIs','Exp 1','Exp 2','Exp 3'];
+  const [sub,setSub]=useState(0);
+  const [name,setName]=useState('');
+  const [domain,setDomain]=useState('');
+  const [sector,setSector]=useState('moda');
+  const [cvr,setCvr]=useState('');
+  const [ticket,setTicket]=useState('');
+  const [transacciones,setTransacciones]=useState('');
+  const [trafico,setTrafico]=useState('');
+  const [mobile,setMobile]=useState(60);
+  const [tipoCompra,setTipoCompra]=useState('mixta');
+  const [recurrentes,setRecurrentes]=useState(30);
+  const [canales,setCanales]=useState([{canal:'',pct:''},{canal:'',pct:''},{canal:'',pct:''}]);
+  const [exp1,setExp1]=useState(null);
+  const [exp2,setExp2]=useState(null);
+  const [exp3,setExp3]=useState(null);
+  const ref1=useRef(),ref2=useRef(),ref3=useRef();
+
+  function score(){
+    let s=40;
+    if(cvr&&ticket&&trafico) s+=5;
+    if(exp1) s+=25;
+    if(exp2) s+=15;
+    if(exp3) s+=15;
+    return Math.min(s,100);
+  }
+
+  function handleFile(f,setter){
+    if(!f) return;
+    const r=new FileReader();
+    r.onload=e=>{const p=parseCSV(e.target.result);if(p) setter({...p,fileName:f.name});};
+    r.readAsText(f,'UTF-8');
+  }
+
+  function CSVBox({parsed,refEl,setter,label,hint,tutorial}){
+    const [showTip,setShowTip]=useState(false);
+    return(
+      <div style={{marginBottom:'14px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}}>
+          <label style={T.label}>{label}</label>
+          <button onClick={()=>setShowTip(!showTip)} style={{fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer'}}>
+            {showTip?'Ocultar tutorial':'¿Cómo exportarlo de GA4?'}
+          </button>
+        </div>
+        {showTip&&(
+          <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px',marginBottom:'10px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>
+            {tutorial}
+          </div>
+        )}
+        <div onClick={()=>refEl.current.click()}
+          style={{border:`1.5px dashed ${parsed?C.green:C.border}`,borderRadius:'10px',padding:'18px',textAlign:'center',cursor:'pointer',background:parsed?C.greenDim:'#070713'}}>
+          <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter)}/>
+          <div style={{fontSize:'20px',marginBottom:'6px'}}>📊</div>
+          {parsed
+            ?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{parsed.fileName} · {parsed.rows.length} filas</p>
+            :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV o haz clic para subir</p>
+          }
+          <p style={{...T.small,marginTop:'4px'}}>{hint}</p>
+        </div>
+        {parsed&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>
+          ✓ Columnas: {parsed.headers.join(', ')}
+        </div>}
+      </div>
+    );
+  }
+
+  function handleSave(){
+    const q=score();
+    onSave({
+      id:'p'+Date.now(),name,domain,sector,createdAt:new Date().toISOString().slice(0,10),quality:q,
+      kpis:{cvr,ticket,transacciones,trafico,mobile,tipoCompra,recurrentes},
+      canales:canales.filter(c=>c.canal),
+      exp1:!!exp1,exp2:!!exp2,exp3:!!exp3,tests:[]
+    });
+  }
+
+  const canNext0=name&&domain;
+  const canNext1=cvr&&ticket&&transacciones&&trafico;
+
+  return(
+    <div className="fade" style={{padding:'28px 32px',maxWidth:'620px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'20px'}}>
+        <button onClick={onCancel} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px'}}>← Proyectos</button>
+        <span style={{color:C.txtDim}}>/</span>
+        <span style={{fontSize:'13px',color:C.txt}}>Nuevo proyecto</span>
+      </div>
+      <h1 style={{...T.h1,marginBottom:'6px'}}>Crear proyecto</h1>
+      <p style={{...T.body,marginBottom:'20px'}}>Configura la base de datos del cliente. Cuanto más completa, más precisos serán los perfiles sintéticos.</p>
+      <QualityBar score={score()}/>
+
+      {/* sub-step bar */}
+      <div style={{display:'flex',gap:'4px',marginBottom:'24px',overflowX:'auto'}}>
+        {SUB.map((st,i)=>(
+          <div key={st} style={{flex:1,textAlign:'center',padding:'8px 4px',borderRadius:'6px',background:i===sub?C.accentDim:'transparent',border:`1px solid ${i===sub?C.accent:C.border}`,cursor:i<sub?'pointer':'default',fontSize:'11px',fontWeight:600,color:i<sub?C.green:i===sub?C.accent:C.txtDim,whiteSpace:'nowrap'}}
+            onClick={()=>i<sub&&setSub(i)}>
+            {i<sub?'✓ ':''}{st}
+          </div>
+        ))}
+      </div>
+
+      {sub===0&&(
+        <Card>
+          <p style={{...T.h3,marginBottom:'14px'}}>Datos del proyecto</p>
+          <Input label='Nombre del proyecto' value={name} onChange={setName} placeholder='Ej: Moda Urban — CRO 2026' required/>
+          <Input label='Dominio' value={domain} onChange={setDomain} placeholder='modaurban.es' required hint='Sin https://'/>
+          <Select label='Sector' value={sector} onChange={setSector} options={SECTORES}/>
+          <div style={s.btnRow||{display:'flex',justifyContent:'flex-end',marginTop:'8px'}}>
+            <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
+            <Btn disabled={!canNext0} onClick={()=>setSub(1)}>Siguiente →</Btn>
+          </div>
+        </Card>
+      )}
+
+      {sub===1&&(
+        <div>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>KPIs del negocio <span style={{color:C.red}}>*</span></p>
+            <p style={{...T.small,marginBottom:'14px'}}>Datos que el cliente conoce sin necesitar GA4.</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+              <Input label='CVR actual (%)' value={cvr} onChange={setCvr} type='number' placeholder='2.4' required/>
+              <Input label='Ticket medio (€)' value={ticket} onChange={setTicket} type='number' placeholder='68' required/>
+              <Input label='Transacciones / mes' value={transacciones} onChange={setTransacciones} type='number' placeholder='320' required/>
+              <Input label='Sesiones / mes' value={trafico} onChange={setTrafico} type='number' placeholder='45000' required/>
+            </div>
+            <div style={{marginBottom:'14px'}}>
+              <label style={{...T.label,display:'block',marginBottom:'6px'}}>% Mobile: {mobile}% · Desktop: {100-mobile-2}% · Tablet: 2%</label>
+              <input type='range' min='10' max='88' step='1' value={mobile} onChange={e=>setMobile(Number(e.target.value))} style={{width:'100%',accentColor:C.accent}}/>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+              <Select label='Tipo de compra' value={tipoCompra} onChange={setTipoCompra} options={[{value:'impulsiva',label:'Impulsiva'},{value:'reflexiva',label:'Reflexiva'},{value:'mixta',label:'Mixta'}]}/>
+              <div>
+                <label style={{...T.label,display:'block',marginBottom:'6px'}}>% Recurrentes: {recurrentes}%</label>
+                <input type='range' min='0' max='100' step='5' value={recurrentes} onChange={e=>setRecurrentes(Number(e.target.value))} style={{width:'100%',accentColor:C.accent,marginTop:'6px'}}/>
+              </div>
+            </div>
+          </Card>
+          <Card>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'14px'}}>
+              <p style={T.h3}>Canales principales (hasta 4)</p>
+              {canales.length<4&&<button style={{fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer'}} onClick={()=>setCanales([...canales,{canal:'',pct:''}])}>+ Añadir</button>}
+            </div>
+            {canales.map((c,i)=>(
+              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 80px',gap:'8px',marginBottom:'8px'}}>
+                <select value={c.canal} onChange={e=>{const n=[...canales];n[i]={...n[i],canal:e.target.value};setCanales(n);}}
+                  style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
+                  <option value=''>Canal...</option>
+                  {CANALES_LIST.map(ch=><option key={ch}>{ch}</option>)}
+                </select>
+                <input type='number' placeholder='%' value={c.pct} onChange={e=>{const n=[...canales];n[i]={...n[i],pct:e.target.value};setCanales(n);}}
+                  style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 10px',color:C.txt,fontSize:'13px',outline:'none',textAlign:'center'}}/>
+              </div>
+            ))}
+          </Card>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
+            <Btn variant='ghost' onClick={()=>setSub(0)}>Atrás</Btn>
+            <Btn disabled={!canNext1} onClick={()=>setSub(2)}>Siguiente →</Btn>
+          </div>
+        </div>
+      )}
+
+      {sub===2&&(
+        <div>
+          <Card style={{marginBottom:'12px',borderColor:C.accent}}>
+            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
+              <Tag color='purple'>Obligatorio</Tag>
+              <p style={T.h3}>Exp 1 — Quién es el usuario</p>
+            </div>
+            <p style={{...T.body,marginBottom:'14px'}}>Define los arquetipos base: quién te visita cruzado con conversión. Sin esto no se pueden generar perfiles fiables.</p>
+            <CSVBox parsed={exp1} refEl={ref1} setter={setExp1}
+              label='CSV de la Exploración 1'
+              hint='Dimensiones: País, Ciudad, Edad, Género, Tipo usuario, Dispositivo · Métricas: Usuarios activos, Sesiones, Conversiones, Tasa de conversión'
+              tutorial={<span>
+                1. GA4 → <b>Explorar</b> → <b>Exploración en blanco</b> (Tabla libre)<br/>
+                2. <b>Dimensiones (filas):</b> País · Ciudad · Edad · Género · Intereses · Idioma<br/>
+                3. <b>Dimensiones (columnas):</b> Tipo de usuario · Dispositivo · Sistema operativo<br/>
+                4. <b>Métricas:</b> Usuarios activos · Sesiones · Tasa de engagement · Sesiones por usuario · Conversiones · Tasa de conversión<br/>
+                5. Rango de fechas: <b>últimos 90 días</b><br/>
+                6. Arriba derecha → <b>Exportar → Descargar CSV</b>
+              </span>}
+            />
+          </Card>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
+            <Btn variant='ghost' onClick={()=>setSub(1)}>Atrás</Btn>
+            <Btn disabled={!exp1} onClick={()=>setSub(3)}>Siguiente →</Btn>
+          </div>
+        </div>
+      )}
+
+      {sub===3&&(
+        <div>
+          <Card style={{marginBottom:'12px',borderColor:C.border}}>
+            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
+              <Tag color='amber'>Opcional +15%</Tag>
+              <p style={T.h3}>Exp 2 — Cómo llega y de dónde viene</p>
+            </div>
+            <p style={{...T.body,marginBottom:'14px'}}>Contexto mental de entrada. Un usuario de paid tiene intención muy distinta a uno de orgánico o newsletter.</p>
+            <CSVBox parsed={exp2} refEl={ref2} setter={setExp2}
+              label='CSV de la Exploración 2'
+              hint='Dimensiones: Canal, Fuente/Medio, Campaña, Página destino · Métricas: Sesiones, Usuarios, Tasa engagement, Duración sesión, Conversiones, CVR'
+              tutorial={<span>
+                1. GA4 → <b>Explorar</b> → <b>Exploración en blanco</b> (Tabla libre)<br/>
+                2. <b>Dimensiones (filas):</b> Canal de sesión · Fuente/Medio · Campaña · Página de destino<br/>
+                3. <b>Dimensiones (columnas):</b> Tipo de usuario · Dispositivo<br/>
+                4. <b>Métricas:</b> Sesiones · Usuarios activos · Tasa de engagement · Duración media sesión · Conversiones · Tasa de conversión de sesión<br/>
+                5. Rango de fechas: <b>últimos 90 días</b><br/>
+                6. Exportar → <b>Descargar CSV</b>
+              </span>}
+            />
+          </Card>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
+            <Btn variant='ghost' onClick={()=>setSub(2)}>Atrás</Btn>
+            <Btn onClick={()=>setSub(4)}>Siguiente →</Btn>
+          </div>
+        </div>
+      )}
+
+      {sub===4&&(
+        <div>
+          <Card style={{marginBottom:'12px',borderColor:C.border}}>
+            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
+              <Tag color='amber'>Opcional +15%</Tag>
+              <p style={T.h3}>Exp 3 — Cómo navega y qué hace dentro</p>
+            </div>
+            <p style={{...T.body,marginBottom:'14px'}}>Rutas reales por segmento. Las diferencias entre conversor y no conversor definen el comportamiento del sintético.</p>
+            <CSVBox parsed={exp3} refEl={ref3} setter={setExp3}
+              label='CSV de la Exploración 3'
+              hint='Exploración de rutas: Nodo inicio = Página destino · Dimensiones: Título página, Nombre evento, Búsqueda interna · Segmentos: por canal, dispositivo, tipo usuario, conversores'
+              tutorial={<span>
+                1. GA4 → <b>Explorar</b> → <b>Exploración de rutas</b> (Path exploration)<br/>
+                2. <b>Nodo de inicio:</b> Página de destino (primera URL visitada)<br/>
+                3. <b>Dimensiones de nodo:</b> Título de página · Nombre del evento · Búsqueda en site<br/>
+                4. <b>Aplica segmentos:</b> Por canal · Por dispositivo · Por tipo usuario · Por conversores<br/>
+                5. Ejecuta la misma exploración con distintos segmentos para comparar rutas<br/>
+                6. Exportar → <b>Descargar CSV</b>
+              </span>}
+            />
+          </Card>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
+            <Btn variant='ghost' onClick={()=>setSub(3)}>Atrás</Btn>
+            <Btn variant='green' onClick={handleSave}>Crear proyecto ({score()}% precisión)</Btn>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-async function callClaude(apiKey, messages, system) {
-  var res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST",
-    headers:{
-      "Content-Type":"application/json",
-      "x-api-key":apiKey,
-      "anthropic-version":"2023-06-01",
-      "anthropic-dangerous-direct-browser-access":"true"
-    },
-    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,system:system,messages:messages})
-  });
-  var data = await res.json();
-  if (!data.content) throw new Error(data.error ? data.error.message : "Error de API");
-  return data.content.map(b=>b.text||"").join("");
-}
+// ── CREATE TEST ───────────────────────────────────────────────────────────
+function CreateTest({project,apiKey,onSave,onCancel}){
+  const TSTEPS=['URL y página','Perfiles','Test','QA','Lanzar'];
+  const [tsub,setTsub]=useState(0);
+  const [url,setUrl]=useState('');
+  const [pagina,setPagina]=useState('página de producto');
+  const [tiempo,setTiempo]=useState('');
+  const [rebote,setRebote]=useState('');
+  const [scroll,setScroll]=useState('');
+  const [abandono,setAbandono]=useState('');
+  const [pageImgs,setPageImgs]=useState({heatmapClics:null,heatmapScroll:null});
+  const [csvRutas,setCsvRutas]=useState(null);
+  const refCsvRutas=useRef();
+  const refHeatClics=useRef();
+  const refHeatScroll=useRef();
+  const [profiles,setProfiles]=useState(null);
+  const [loadingP,setLoadingP]=useState(false);
+  const [errP,setErrP]=useState('');
+  const [nProfiles,setNProfiles]=useState(20);
+  const [hip,setHip]=useState('');
+  const [varA,setVarA]=useState('');
+  const [varB,setVarB]=useState('');
+  const [imgB,setImgB]=useState(null);
+  const [imgBName,setImgBName]=useState('');
+  const [figmaUrl,setFigmaUrl]=useState('');
+  const [metricaP,setMetricaP]=useState('tasa de conversión');
+  const [metricaPCustom,setMetricaPCustom]=useState('');
+  const [metricasS,setMetricasS]=useState([]);
+  const [split,setSplit]=useState(50);
+  const [results,setResults]=useState(null);
+  const [loadingSim,setLoadingSim]=useState(false);
+  const [errSim,setErrSim]=useState('');
+  const imgRef=useRef();
 
-function parseJSON(raw) {
-  var clean = raw.replace(/```json/g,"").replace(/```/g,"").trim();
-  var s1 = clean.indexOf("["), s2 = clean.indexOf("{");
-  if(s1!==-1 && (s2===-1||s1<s2)) return JSON.parse(clean.slice(s1,clean.lastIndexOf("]")+1));
-  return JSON.parse(clean.slice(s2,clean.lastIndexOf("}")+1));
-}
-
-// Leer CSV de forma robusta
-function parseCSV(text) {
-  // Normalizar saltos de línea y limpiar BOM
-  var clean = text.replace(/^\uFEFF/,"").replace(/\r\n/g,"\n").replace(/\r/g,"\n").trim();
-  var lines = clean.split("\n").filter(l=>l.trim());
-  if(lines.length < 2) return null;
-  // Detectar separador (coma o punto y coma)
-  var sep = lines[0].includes(";") ? ";" : ",";
-  var headers = lines[0].split(sep).map(h=>h.trim().replace(/"/g,""));
-  var rows = lines.slice(1).map(function(line) {
-    var vals = line.split(sep).map(v=>v.trim().replace(/"/g,""));
-    var obj = {};
-    headers.forEach(function(h,i){ obj[h] = vals[i]||""; });
-    return obj;
-  });
-  return { headers, rows, raw: clean };
-}
-
-function ApiScreen({onReady}) {
-  const [key,setKey] = useState("");
-  const [loading,setLoading] = useState(false);
-  const [err,setErr] = useState("");
-
-  async function verify() {
-    setLoading(true); setErr("");
-    try {
-      await callClaude(key,[{role:"user",content:"di ok"}],"Di solo: ok");
-      onReady(key);
-    } catch(e) { setErr("Clave inválida o sin conexión: "+e.message); }
-    setLoading(false);
+  // Helper: imagen upload para heatmaps
+  function ImgUpload({label,hint,field,state,setter,refKey}){
+    const refs={refHeatClics,refHeatScroll};
+    const ref=refs[refKey];
+    const val=state[field];
+    return(
+      <div>
+        <label style={{...T.label,display:'block',marginBottom:'5px'}}>{label}</label>
+        <div onClick={()=>ref.current.click()}
+          style={{border:`1.5px dashed ${val?C.green:C.border}`,borderRadius:'8px',padding:'14px',textAlign:'center',cursor:'pointer',background:val?C.greenDim:'#070713',minHeight:'80px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'5px'}}>
+          <input ref={ref} type='file' accept='.jpg,.jpeg,.png,.webp' style={{display:'none'}}
+            onChange={e=>{if(e.target.files[0]) setter(prev=>({...prev,[field]:e.target.files[0].name}));}}/>
+          <span style={{fontSize:'18px'}}>{val?'✓':'🖼'}</span>
+          <p style={{fontSize:'11px',color:val?C.green:C.txtDim,fontWeight:val?600:400}}>{val||'Arrastra imagen o haz clic'}</p>
+          <p style={{...T.small}}>{hint}</p>
+        </div>
+      </div>
+    );
   }
 
-  return (
-    <div style={{maxWidth:"420px",margin:"0 auto",padding:"56px 20px"}}>
-      <div style={{textAlign:"center",marginBottom:"32px"}}>
-        <div style={{width:"48px",height:"48px",borderRadius:"12px",background:ACCENT,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"22px",margin:"0 auto 14px"}}>⬡</div>
-        <p style={{...s.title,textAlign:"center",fontSize:"24px",marginBottom:"6px"}}>SynthAB</p>
-        <p style={{fontSize:"13px",color:"#4A4A6A",lineHeight:"1.6"}}>Tests A/B con usuarios sintéticos.<br/>Resultados en minutos, no en semanas.</p>
+  // Helper: csv upload simple
+  function CsvUploadSimple({label,hint,parsed,setter,refEl}){
+    function handleFile(f){
+      if(!f) return;
+      const r=new FileReader();
+      r.onload=e=>{const p=parseCSV(e.target.result);if(p) setter({...p,fileName:f.name});};
+      r.readAsText(f,'UTF-8');
+    }
+    return(
+      <div>
+        <label style={{...T.label,display:'block',marginBottom:'5px'}}>{label}</label>
+        <div onClick={()=>refEl.current.click()}
+          style={{border:`1.5px dashed ${parsed?C.green:C.border}`,borderRadius:'8px',padding:'14px',textAlign:'center',cursor:'pointer',background:parsed?C.greenDim:'#070713'}}>
+          <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0])}/>
+          <span style={{fontSize:'18px',display:'block',marginBottom:'4px'}}>📊</span>
+          {parsed
+            ?<p style={{fontSize:'12px',color:C.green,fontWeight:600}}>{parsed.fileName} · {parsed.rows.length} filas</p>
+            :<p style={{fontSize:'12px',color:C.txtDim}}>Arrastra CSV o haz clic</p>}
+          <p style={{...T.small,marginTop:'3px'}}>{hint}</p>
+        </div>
+        {parsed&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'6px 10px',marginTop:'5px'}}>
+          ✓ Columnas: {parsed.headers.join(', ')}
+        </div>}
       </div>
-      <div style={s.card}>
-        <label style={s.label}>API Key de Anthropic</label>
-        <input style={{...s.inp,fontFamily:"monospace",fontSize:"12px",letterSpacing:"0.02em"}} type="password" placeholder="sk-ant-api03-..." value={key} onChange={e=>setKey(e.target.value)} onKeyDown={e=>e.key==="Enter"&&verify()}/>
-        {err && <p style={{color:"#FF6B6B",fontSize:"12px",marginTop:"7px"}}>{err}</p>}
-        <p style={{fontSize:"11px",color:"#2A2A4A",marginTop:"9px"}}>
-          Consíguela en <a href="https://console.anthropic.com" target="_blank" style={{color:ACCENT}}>console.anthropic.com</a> → API Keys
-        </p>
+    );
+  }
+
+  const paginas=['página de producto','homepage','checkout','categoría','carrito','landing de campaña','página de colección'];
+  const metricas=['tasa de conversión','clics en CTA','tasa de rebote','tiempo en página','añadidos al carrito','ingresos por sesión'];
+
+  async function generarPerfiles(){
+    setLoadingP(true);setErrP('');
+    try{
+      const prompt=`Genera exactamente ${nProfiles} perfiles sintéticos para un ecommerce de ${project.sector}.
+
+DATOS DEL PROYECTO:
+CVR base: ${project.kpis.cvr}%, Ticket: ${project.kpis.ticket}€, Tráfico: ${project.kpis.trafico}/mes
+Mobile: ${project.kpis.mobile}%, Tipo compra: ${project.kpis.tipoCompra}, Recurrentes: ${project.kpis.recurrentes}%
+Canales: ${JSON.stringify(project.canales)}
+
+DATOS ESPECÍFICOS DE LA PÁGINA A TESTAR:
+URL: ${url}, Página: ${pagina}
+${tiempo?'Tiempo medio en página: '+tiempo+'s':''}
+${rebote?'Tasa rebote página: '+rebote+'%':''}
+${scroll?'Scroll depth: '+scroll+'%':''}
+${abandono?'Principal abandono: '+abandono:''}
+
+Genera perfiles coherentes. prob_conversion anclado al CVR real (${project.kpis.cvr}% media).
+Cada perfil: {"id":"001","edad":"25-34","genero":"mujer","ciudad":"Madrid","dispositivo":"mobile","madurez":4,"canal":"Orgánico / SEO","tipo":"recurrente","prob_conversion":0.041,"scroll_depth":68,"tiempo_sesion_seg":95,"motivacion":"calidad","fase_funnel":"decision","sensibilidad_precio":"media","initials":"MG"}
+SOLO array JSON válido.`;
+      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO con JSON válido sin texto extra.');
+      setProfiles(parseJSON(raw));
+      setTsub(2);
+    }catch(e){setErrP('Error: '+e.message);}
+    setLoadingP(false);
+  }
+
+  async function simular(){
+    setLoadingSim(true);setErrSim('');
+    try{
+      const sample=(profiles||[]).slice(0,15).map(p=>({id:p.id,edad:p.edad,genero:p.genero,dispositivo:p.dispositivo,madurez:p.madurez,canal:p.canal,tipo:p.tipo,prob_conversion:p.prob_conversion,motivacion:p.motivacion,fase_funnel:p.fase_funnel,sensibilidad_precio:p.sensibilidad_precio}));
+      const prompt=`Motor simulación A/B. Sector: ${project.sector}. CVR base: ${project.kpis.cvr}%. URL: ${url}. Página: ${pagina}.
+Hipótesis: ${hip}. Variante A: ${varA}. Variante B: ${varB}. Métrica: ${metricaP}. Split: ${split}%A/${100-split}%B.
+Perfiles: ${JSON.stringify(sample)}
+B no gana automáticamente. Considera motivación, fase funnel, sensibilidad precio, dispositivo.
+Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"cvr_b":2.6,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,"segmentos":[{"nombre":"18-24","resultado":"B gana fuerte","diff_pct":22}],"razones_abandono":["razón 1"],"insights":["insight 1"],"recomendacion":"texto"}`;
+      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido.');
+      setResults(parseJSON(raw));setTsub(3);
+    }catch(e){setErrSim('Error: '+e.message);}
+    setLoadingSim(false);
+  }
+
+  function handleSave(){
+    const t={
+      id:'t'+Date.now(),name:hip.slice(0,40)||'Nuevo test',url,status:'completado',
+      ganador:results?.ganador,uplift:results?(results.uplift_cvr>0?'+':'')+Number(results.uplift_cvr).toFixed(1)+'%':null,
+      createdAt:new Date().toISOString().slice(0,10),results
+    };
+    onSave(t);
+  }
+
+  if(loadingP) return <Spinner text='Generando perfiles sintéticos...' sub={`Anclando al CVR real del proyecto (${project.kpis.cvr}%)`}/>;
+  if(loadingSim) return <Spinner text={`Simulando ${(profiles||[]).length} agentes...`} sub='Cada agente decide según motivación, fase de funnel y comportamiento real'/>;
+
+  return(
+    <div className='fade' style={{padding:'28px 32px',maxWidth:'640px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'16px'}}>
+        <button onClick={onCancel} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px'}}>← {project.name}</button>
+        <span style={{color:C.txtDim}}>/</span>
+        <span style={{fontSize:'13px',color:C.txt}}>Nuevo test</span>
       </div>
-      <button style={{...s.btn,width:"100%",padding:"12px",opacity:key.length>20?1:0.4}} disabled={key.length<20||loading} onClick={verify}>
-        {loading?"Verificando...":"Entrar →"}
+      <QualityBar score={project.quality}/>
+
+      {/* step bar */}
+      <div style={{display:'flex',gap:'4px',marginBottom:'22px',overflowX:'auto'}}>
+        {TSTEPS.map((st,i)=>(
+          <div key={st} style={{flex:1,textAlign:'center',padding:'8px 4px',borderRadius:'6px',fontSize:'11px',fontWeight:600,
+            background:i===tsub?C.accentDim:'transparent',border:`1px solid ${i===tsub?C.accent:C.border}`,
+            color:i<tsub?C.green:i===tsub?C.accent:C.txtDim,whiteSpace:'nowrap'}}>{i<tsub?'✓ ':''}{st}</div>
+        ))}
+      </div>
+
+      {tsub===0&&(
+        <div>
+          {/* URL + tipo */}
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>URL de la página a testar</p>
+            <Input label='URL completa' value={url} onChange={setUrl} placeholder='https://tienda.com/producto/zapatillas' required hint='La IA usará esta URL para contextualizar el comportamiento de cada agente en esta página concreta.'/>
+            <Select label='Tipo de página' value={pagina} onChange={setPagina} options={paginas}/>
+          </Card>
+
+          {/* KPIs de la página */}
+          <Card style={{marginBottom:'12px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
+              <p style={T.h3}>KPIs de esta página</p>
+              <Tag color='amber'>Opcional — mejora perfiles</Tag>
+            </div>
+            <p style={{...T.body,marginBottom:'14px'}}>Datos específicos de esta URL, no del site global. Cuanto más precisos, mejor simularán los agentes esta página concreta.</p>
+            <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 13px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7',marginBottom:'14px'}}>
+              💡 <strong style={{color:C.txt}}>Cómo obtenerlos en GA4:</strong> Explorar → Exploración en blanco → añade filtro <span style={{color:C.green,fontFamily:'monospace'}}>Página + cadena de consulta</span> con la URL exacta → métricas: Vistas, Usuarios activos, T. interacción medio, Tasa de engagement, Tasa de rebote, Conversiones, CVR de sesión, Eventos por sesión.
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'10px'}}>
+              <Input label='Tiempo medio en página (seg)' value={tiempo} onChange={setTiempo} type='number' placeholder='95'/>
+              <Input label='Tasa de rebote de esta página (%)' value={rebote} onChange={setRebote} type='number' placeholder='38'/>
+              <Input label='Scroll depth medio (%)' value={scroll} onChange={setScroll} type='number' placeholder='65'/>
+              <div>
+                <label style={{...T.label,display:'block',marginBottom:'5px'}}>Principal zona de abandono</label>
+                <select value={abandono} onChange={e=>setAbandono(e.target.value)}
+                  style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
+                  <option value=''>No lo sé</option>
+                  <optgroup label='— Antes de ver contenido'>
+                    <option>Nada más entrar — rebote inmediato</option>
+                    <option>Sin hacer scroll — no llegan al contenido</option>
+                    <option>Antes del primer CTA visible</option>
+                  </optgroup>
+                  <optgroup label='— Durante la navegación'>
+                    <option>Al ver el precio</option>
+                    <option>Al ver los gastos de envío</option>
+                    <option>En la galería de imágenes</option>
+                    <option>En la descripción del producto</option>
+                    <option>Al leer las valoraciones / reviews</option>
+                    <option>En el selector de talla / variante</option>
+                    <option>Antes del CTA principal (comprar / reservar)</option>
+                  </optgroup>
+                  <optgroup label='— En el proceso de compra'>
+                    <option>Al hacer clic en el CTA — no continúan</option>
+                    <option>En el carrito — ven el total y salen</option>
+                    <option>En el formulario de datos</option>
+                    <option>En la selección de método de pago</option>
+                    <option>En el checkout — proceso demasiado largo</option>
+                    <option>En la confirmación — error o desconfianza</option>
+                  </optgroup>
+                  <optgroup label='— Navegación interna'>
+                    <option>Van a otra categoría — no encuentran lo que buscan</option>
+                    <option>Usan el buscador interno — no encuentran producto</option>
+                    <option>Vuelven atrás desde esta página</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+          </Card>
+
+          {/* Heatmaps */}
+          <Card style={{marginBottom:'12px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
+              <p style={T.h3}>Mapas de calor</p>
+              <Tag color='amber'>Opcional — enriquece mucho</Tag>
+            </div>
+            <p style={{...T.body,marginBottom:'14px'}}>Capturas de Hotjar, Microsoft Clarity o FullStory de esta página. La IA las interpretará para entender dónde hace clic y hasta dónde llega el usuario real.</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+              <ImgUpload label='🖱 Heatmap de clics' hint='Captura del mapa de clics de esta página' field='heatmapClics' state={pageImgs} setter={setPageImgs} refKey='refHeatClics'/>
+              <ImgUpload label='↕ Mapa de scrolls' hint='Captura del scroll depth de esta página' field='heatmapScroll' state={pageImgs} setter={setPageImgs} refKey='refHeatScroll'/>
+            </div>
+          </Card>
+
+          {/* CSV rutas */}
+          <Card style={{marginBottom:'12px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
+              <p style={T.h3}>CSV de comportamiento en esta URL</p>
+              <Tag color='amber'>Opcional — muy recomendado</Tag>
+            </div>
+            <p style={{...T.body,marginBottom:'12px'}}>Crea una exploración en GA4 filtrada por esta URL concreta. Muestra cómo navegan los distintos segmentos en esta página y qué diferencia a los que convierten de los que no.</p>
+
+            {/* Tutorial en dos columnas */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'12px'}}>
+
+              {/* Col izq — cómo filtrar */}
+              <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>
+                <p style={{color:C.txt,fontWeight:600,marginBottom:'8px',display:'flex',alignItems:'center',gap:'6px'}}>
+                  <span style={{color:C.accent}}>▽</span> Cómo filtrar la URL
+                </p>
+                <div style={{display:'flex',gap:'8px',marginBottom:'7px'}}>
+                  <span style={{width:'18px',height:'18px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'10px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>1</span>
+                  <div><p style={{color:C.txt,fontWeight:500}}>Añade el filtro en la exploración</p><p>En el panel derecho → Filtros → + Añadir filtro</p></div>
+                </div>
+                <div style={{display:'flex',gap:'8px',marginBottom:'7px'}}>
+                  <span style={{width:'18px',height:'18px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'10px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>2</span>
+                  <div><p style={{color:C.txt,fontWeight:500}}>Dimensión a filtrar</p><p><span style={{color:C.green,fontFamily:'monospace'}}>Página + cadena de consulta</span><br/>o bien <span style={{color:C.green,fontFamily:'monospace'}}>Ruta de página</span> si no hay query string</p></div>
+                </div>
+                <div style={{display:'flex',gap:'8px'}}>
+                  <span style={{width:'18px',height:'18px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'10px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>3</span>
+                  <div><p style={{color:C.txt,fontWeight:500}}>Condición</p><p>Usa <strong style={{color:C.txt}}>contiene</strong> si la URL puede variar, o <strong style={{color:C.txt}}>exactamente coincide</strong> si es fija<br/><span style={{color:C.green,fontFamily:'monospace'}}>/ruta-de-tu-pagina</span></p></div>
+                </div>
+              </div>
+
+              {/* Col der — dimensiones */}
+              <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>
+                <p style={{color:C.txt,fontWeight:600,marginBottom:'8px',display:'flex',alignItems:'center',gap:'6px'}}>
+                  <span style={{color:C.accent}}>▦</span> Dimensiones como filas
+                </p>
+                {[
+                  ['Página + cadena de consulta','URL exacta'],
+                  ['Canal de sesión','De dónde viene el tráfico'],
+                  ['Tipo de usuario','Nuevo vs recurrente'],
+                  ['Categoría de dispositivo','Mobile vs desktop'],
+                  ['País','Si hay variación geográfica'],
+                  ['Segmento de audiencia','Si tienes audiencias creadas'],
+                ].map(([dim,desc])=>(
+                  <div key={dim} style={{display:'flex',justifyContent:'space-between',borderBottom:`1px solid ${C.border}`,padding:'3px 0'}}>
+                    <span style={{color:C.green,fontFamily:'monospace',fontSize:'11px'}}>{dim}</span>
+                    <span style={{color:C.txtDim,fontSize:'11px',textAlign:'right',maxWidth:'120px'}}>{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Métricas */}
+            <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8',marginBottom:'12px'}}>
+              <p style={{color:C.txt,fontWeight:600,marginBottom:'8px',display:'flex',alignItems:'center',gap:'6px'}}>
+                <span style={{color:C.accent}}>↗</span> Métricas imprescindibles para la URL
+              </p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px'}}>
+                {[
+                  ['Vistas','Volumen total de tráfico'],
+                  ['Tasa de rebote','Entran y se van sin interactuar'],
+                  ['Usuarios activos','Personas únicas que la ven'],
+                  ['Conversiones','Objetivo completado desde esta página'],
+                  ['Tiempo de interacción medio','¿Leen o rebotan?'],
+                  ['Tasa de conversión de sesión','% sesiones que convierten'],
+                  ['Tasa de engagement','% sesiones con interacción real'],
+                  ['Eventos por sesión','Nivel de interacción'],
+                  ['Sesiones con engagement','Sesiones de calidad'],
+                  ['Vistas por usuario','¿Vuelven a esta página?'],
+                ].map(([met,desc])=>(
+                  <div key={met} style={{display:'flex',justifyContent:'space-between',borderBottom:`1px solid ${C.border}`,padding:'3px 0',gap:'8px'}}>
+                    <span style={{color:C.green,fontFamily:'monospace',fontSize:'11px',flexShrink:0}}>{met}</span>
+                    <span style={{color:C.txtDim,fontSize:'11px',textAlign:'right'}}>{desc}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{marginTop:'10px',padding:'8px 10px',background:'#0D1A2E',borderRadius:'6px',border:`1px solid rgba(75,158,255,0.2)`}}>
+                <p style={{fontSize:'11px',color:C.blue,lineHeight:'1.6'}}>
+                  💡 <strong style={{color:C.txt}}>Truco:</strong> pon la dimensión en filas y los segmentos (canal, dispositivo, nuevo/recurrente) como desglose secundario. Así en una sola tabla ves el comportamiento de cada perfil en esa URL.
+                </p>
+              </div>
+            </div>
+
+            <CsvUploadSimple
+              label='Subir CSV exportado de GA4'
+              hint='Exportar → Descargar CSV desde la exploración configurada arriba'
+              parsed={csvRutas}
+              setter={setCsvRutas}
+              refEl={refCsvRutas}
+            />
+          </Card>
+
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
+            <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
+            <Btn disabled={!url} onClick={()=>setTsub(1)}>Generar perfiles →</Btn>
+          </div>
+        </div>
+      )}
+
+      {tsub===1&&(
+        <div>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'8px'}}>Generación de perfiles sintéticos</p>
+            <p style={{...T.body,marginBottom:'14px'}}>La IA combina la base del proyecto con los datos específicos de la página para crear agentes realistas.</p>
+            <Select label='Número de perfiles' value={nProfiles} onChange={v=>setNProfiles(Number(v))} options={[{value:10,label:'10 — prueba rápida'},{value:20,label:'20 — demo recomendado'},{value:50,label:'50 — más representativo'}]}/>
+            <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 13px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>
+              📊 Usando datos base del proyecto: CVR {project.kpis.cvr}% · {project.kpis.mobile}% mobile · sector {project.sector}
+            </div>
+            {errP&&<p style={{color:C.red,fontSize:'12px',marginTop:'8px'}}>⚠ {errP}</p>}
+          </Card>
+
+          {/* Perfiles generados — se muestran aquí mismo */}
+          {profiles&&(
+            <Card style={{marginBottom:'12px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px'}}>
+                <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                  <Tag color='green'>{profiles.length} perfiles generados</Tag>
+                  <Tag color='blue'>{project.sector}</Tag>
+                  <Tag color='amber'>{project.quality||72}% precisión</Tag>
+                </div>
+
+              </div>
+              <div style={{maxHeight:'380px',overflowY:'auto'}}>
+                {profiles.map((p,i)=>(
+                  <div key={p.id} style={{display:'flex',alignItems:'center',gap:'10px',padding:'8px 0',borderBottom:`1px solid ${C.border}`}}>
+                    <div style={{width:'30px',height:'30px',borderRadius:'50%',background:['#6C63FF','#00D4AA','#FF6B9D','#F5A623','#4ECDC4'][i%5],display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:700,color:'#fff',flexShrink:0}}>{p.initials||'P'+(i+1)}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:'12px',color:C.txt,fontWeight:500}}>#{p.id} · {p.edad} · {p.genero} · {p.dispositivo}</div>
+                      <div style={{fontSize:'11px',color:C.txtDim,marginTop:'1px'}}>{p.ciudad} · {p.canal} · {p.tipo} · {p.fase_funnel} · motiv: {p.motivacion}</div>
+                    </div>
+                    <div style={{display:'flex',gap:'5px',flexShrink:0}}>
+                      <Tag color={p.prob_conversion>0.05?'green':'amber'}>CVR {(p.prob_conversion*100).toFixed(1)}%</Tag>
+                      <Tag color={p.sensibilidad_precio==='alta'?'red':p.sensibilidad_precio==='baja'?'green':'default'}>{p.sensibilidad_precio}</Tag>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'12px'}}>
+            <Btn variant='ghost' onClick={()=>setTsub(0)}>Atrás</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={()=>{setProfiles(null);generarPerfiles();}}>
+                {profiles?'Regenerar':'Generar perfiles'}
+              </Btn>
+              <Btn disabled={!profiles} onClick={()=>setTsub(2)}>Continuar →</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tsub===2&&profiles&&(
+        <div>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>Configuración del test</p>
+
+            {/* Hipótesis */}
+            <div style={{marginBottom:'14px'}}>
+              <label style={{...T.label,display:'block',marginBottom:'5px'}}>Hipótesis <span style={{color:C.red}}>*</span></label>
+              <textarea value={hip} onChange={e=>setHip(e.target.value)} placeholder='Creemos que [cambio] aumentará [métrica] porque [razón basada en datos]...'
+                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',resize:'vertical',minHeight:'70px'}}/>
+              <p style={{...T.small,marginTop:'3px'}}>Cambio propuesto + efecto esperado + razón basada en datos.</p>
+            </div>
+
+            {/* Variantes */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'14px'}}>
+              <div>
+                <label style={{...T.label,display:'block',marginBottom:'5px'}}><Tag color='purple'>Variante A</Tag> Control actual <span style={{color:C.red}}>*</span></label>
+                <input value={varA} onChange={e=>setVarA(e.target.value)} placeholder="Ej: Botón azul 'Añadir al carrito'"
+                  style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
+              </div>
+              <div>
+                <label style={{...T.label,display:'block',marginBottom:'5px'}}><Tag color='green'>Variante B</Tag> Cambio propuesto <span style={{color:C.red}}>*</span></label>
+                <input value={varB} onChange={e=>setVarB(e.target.value)} placeholder="Ej: Botón verde 'Comprar ahora'"
+                  style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
+              </div>
+            </div>
+
+            {/* Diseño variante B */}
+            <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px',marginBottom:'14px'}}>
+              <p style={{...T.label,marginBottom:'10px'}}>Diseño de Variante B <Tag color='amber'>Opcional</Tag></p>
+              <div style={{display:'flex',gap:'8px'}}>
+                <div onClick={()=>imgRef.current.click()} style={{flex:1,border:`1px dashed ${imgBName?C.green:C.border}`,borderRadius:'8px',padding:'12px',textAlign:'center',cursor:'pointer',background:imgBName?C.greenDim:'transparent'}}>
+                  <input ref={imgRef} type='file' accept='.jpg,.jpeg,.png,.webp' style={{display:'none'}} onChange={e=>{if(e.target.files[0]){setImgBName(e.target.files[0].name);setFigmaUrl('');}}}/>
+                  <div style={{fontSize:'16px',marginBottom:'4px'}}>🖼</div>
+                  <p style={{fontSize:'11px',color:imgBName?C.green:C.txtDim}}>{imgBName||'Subir JPG/PNG'}</p>
+                </div>
+                <div style={{display:'flex',alignItems:'center',color:C.txtDim,fontSize:'12px'}}>o</div>
+                <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'center'}}>
+                  <input value={figmaUrl} onChange={e=>{setFigmaUrl(e.target.value);setImgBName('');}} placeholder='Link de Figma...'
+                    style={{width:'100%',background:'transparent',border:`1px solid ${figmaUrl?C.accent:C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+                  {figmaUrl&&<p style={{fontSize:'10px',color:C.accent,marginTop:'3px'}}>✓ Figma conectado</p>}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Métricas */}
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>Métricas del test</p>
+
+            {/* Métrica principal */}
+            <div style={{marginBottom:'16px'}}>
+              <label style={{...T.label,display:'block',marginBottom:'6px'}}>Métrica principal <span style={{color:C.red}}>*</span></label>
+              <p style={{...T.small,marginBottom:'8px'}}>La métrica decisiva. La que determinará qué variante gana.</p>
+              <select value={metricaP} onChange={e=>setMetricaP(e.target.value)}
+                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',marginBottom:'8px'}}>
+                <optgroup label='— Conversión'>
+                  <option value='tasa de conversión'>Tasa de conversión (CVR)</option>
+                  <option value='transacciones'>Transacciones totales</option>
+                  <option value='ingresos por sesión'>Ingresos por sesión</option>
+                  <option value='ticket medio (AOV)'>Ticket medio (AOV)</option>
+                </optgroup>
+                <optgroup label='— Interacción'>
+                  <option value='clics en CTA principal'>Clics en CTA principal</option>
+                  <option value='añadidos al carrito'>Añadidos al carrito</option>
+                  <option value='inicio de checkout'>Inicio de checkout</option>
+                  <option value='scroll depth'>Scroll depth</option>
+                  <option value='tiempo en página'>Tiempo en página</option>
+                </optgroup>
+                <optgroup label='— Engagement'>
+                  <option value='tasa de rebote'>Tasa de rebote</option>
+                  <option value='páginas por sesión'>Páginas por sesión</option>
+                  <option value='tasa de engagement'>Tasa de engagement</option>
+                </optgroup>
+                <option value='otro'>Otro — escribir a mano</option>
+              </select>
+              {metricaP==='otro'&&(
+                <input value={metricaPCustom} onChange={e=>setMetricaPCustom(e.target.value)}
+                  placeholder='Ej: Clics en banner hero, Reproducciones de vídeo, Descargas de PDF...'
+                  style={{width:'100%',background:'#070713',border:`1px solid ${C.accent}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
+              )}
+            </div>
+
+            {/* Métricas secundarias */}
+            <div style={{marginBottom:'14px'}}>
+              <label style={{...T.label,display:'block',marginBottom:'6px'}}>Métricas secundarias <Tag color='default'>Opcional</Tag></label>
+              <p style={{...T.small,marginBottom:'10px'}}>Se analizarán en el reporte pero no deciden el ganador.</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
+                {[
+                  'Clics en CTA principal','Tasa de rebote','Scroll depth','Tiempo en página',
+                  'Añadidos al carrito','Inicio de checkout','Páginas por sesión','Tasa de engagement',
+                  'Ingresos por sesión','Ticket medio (AOV)','Transacciones','Vistas por usuario',
+                ].filter(m=>m.toLowerCase()!==metricaP.toLowerCase()).map(m=>{
+                  const active=metricasS.includes(m);
+                  return(
+                    <div key={m} onClick={()=>setMetricasS(prev=>active?prev.filter(x=>x!==m):[...prev,m])}
+                      style={{display:'flex',alignItems:'center',gap:'7px',padding:'7px 10px',borderRadius:'7px',cursor:'pointer',
+                        border:`1px solid ${active?C.accent:C.border}`,background:active?C.accentDim:'transparent',fontSize:'12px',color:active?C.accent:C.txtMid}}>
+                      <span style={{fontSize:'10px'}}>{active?'✓':'○'}</span>{m}
+                    </div>
+                  );
+                })}
+              </div>
+              {metricasS.length>0&&(
+                <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginTop:'8px'}}>
+                  {metricasS.map(m=><Tag key={m} color='purple'>{m}</Tag>)}
+                </div>
+              )}
+            </div>
+
+            {/* Split */}
+            <div>
+              <label style={{...T.label,display:'block',marginBottom:'6px'}}>Split de tráfico: A {split}% / B {100-split}%</label>
+              <input type='range' min='10' max='90' step='5' value={split} onChange={e=>setSplit(Number(e.target.value))} style={{width:'100%',accentColor:C.accent}}/>
+              <p style={{...T.small,marginTop:'3px'}}>50/50 para tests exploratorios · 80/20 para proteger tráfico actual</p>
+            </div>
+          </Card>
+
+          {errSim&&<p style={{color:C.red,fontSize:'12px',marginBottom:'8px'}}>⚠ {errSim}</p>}
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+            <Btn variant='ghost' onClick={()=>setTsub(1)}>Atrás</Btn>
+            <Btn disabled={!hip||!varA||!varB} onClick={simular}>Simular →</Btn>
+          </div>
+        </div>
+      )}
+
+      {tsub===3&&results&&(
+        <div>
+          <div style={{background:'#0A1A14',border:`1px solid rgba(0,212,170,0.2)`,borderRadius:'12px',padding:'16px 18px',marginBottom:'16px',display:'flex',alignItems:'center',gap:'14px'}}>
+            <span style={{fontSize:'24px'}}>🏆</span>
+            <div style={{flex:1}}>
+              <p style={{fontSize:'15px',fontWeight:700,color:C.green}}>Variante {results.ganador} gana — {results.ganador==='B'?varB:varA}</p>
+              <p style={{fontSize:'12px',color:'#3A6A5A'}}>{results.confianza}% confianza estadística</p>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <div style={{fontSize:'24px',fontWeight:700,color:C.green}}>{results.uplift_cvr>0?'+':''}{Number(results.uplift_cvr).toFixed(1)}%</div>
+              <div style={{fontSize:'11px',color:'#3A5A4A'}}>uplift CVR</div>
+            </div>
+          </div>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.label,marginBottom:'10px'}}>Resumen QA</p>
+            {[
+              {k:'URL testada',v:url},{k:'Variante A',v:varA},{k:'Variante B',v:varB},
+              {k:'Perfiles simulados',v:profiles.length},{k:'Métrica principal',v:metricaP},
+              {k:'Split',v:`A ${split}% / B ${100-split}%`},
+            ].map(row=>(
+              <div key={row.k} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px'}}>
+                <span style={{color:C.txtDim}}>{row.k}</span>
+                <span style={{color:C.txt,fontWeight:500}}>{row.v}</span>
+              </div>
+            ))}
+          </Card>
+          {results.insights&&results.insights.length>0&&(
+            <Card style={{marginBottom:'12px'}}>
+              <p style={{...T.label,marginBottom:'10px'}}>Insights principales</p>
+              {results.insights.slice(0,2).map((ins,i)=>(
+                <div key={i} style={{display:'flex',gap:'8px',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px',color:C.txtMid,lineHeight:'1.6'}}>
+                  <span style={{color:[C.green,C.amber][i],flexShrink:0,marginTop:'2px'}}>◆</span>{ins}
+                </div>
+              ))}
+            </Card>
+          )}
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+            <Btn variant='ghost' onClick={()=>setTsub(2)}>Revisar</Btn>
+            <Btn variant='green' onClick={()=>setTsub(4)}>Lanzar test →</Btn>
+          </div>
+        </div>
+      )}
+
+      {tsub===4&&(
+        <div>
+          <Card style={{textAlign:'center',padding:'32px',marginBottom:'16px'}}>
+            <div style={{fontSize:'40px',marginBottom:'12px'}}>✓</div>
+            <p style={{...T.h2,marginBottom:'6px'}}>Test listo para lanzar</p>
+            <p style={{...T.body,marginBottom:'20px'}}>El test ha pasado el QA y los resultados de la simulación están disponibles. Guárdalo en el proyecto.</p>
+            <Btn variant='green' onClick={handleSave}>Guardar en proyecto</Btn>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── REPORT VIEW ───────────────────────────────────────────────────────────
+function ReportView({project,test,results,onBack}){
+  const r=results||PILOT_RESULTS[test?.id]||{};
+  const gB=r.ganador==='B';
+  const IC=[C.green,C.amber,C.red,C.accent];
+  function copiar(){
+    const txt=`REPORTE TEST A/B — SynthAB\n\nProyecto: ${project.name}\nURL: ${test?.url}\n\nGanador: Variante ${r.ganador}\nUplift CVR: ${r.uplift_cvr>0?'+':''}${Number(r.uplift_cvr).toFixed(1)}%\nConfianza: ${r.confianza}%\n\nRecomendación:\n${r.recomendacion}`;
+    navigator.clipboard.writeText(txt).then(()=>alert('Copiado ✓'));
+  }
+  if(!r.ganador) return(
+    <div className='fade' style={{padding:'28px 32px'}}>
+      <button onClick={onBack} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px',marginBottom:'20px'}}>← {project.name}</button>
+      <Card style={{textAlign:'center',padding:'48px'}}>
+        <p style={{fontSize:'32px',marginBottom:'12px'}}>◎</p>
+        <p style={T.h3}>Test en curso — sin resultados todavía</p>
+        <p style={{...T.body,marginTop:'6px'}}>Los resultados aparecerán aquí cuando la simulación esté completada.</p>
+      </Card>
+    </div>
+  );
+  return(
+    <div className='fade' style={{padding:'28px 32px',maxWidth:'680px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'20px',flexWrap:'wrap',gap:'10px'}}>
+        <div>
+          <button onClick={onBack} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px',marginBottom:'6px',display:'block'}}>← {project.name}</button>
+          <h1 style={T.h1}>{test?.name||'Reporte'}</h1>
+          <p style={{...T.mono,marginTop:'3px'}}>{test?.url}</p>
+        </div>
+        <Btn variant='ghost' onClick={copiar}>Copiar reporte</Btn>
+      </div>
+      <div style={{background:'#0A1A14',border:'1px solid rgba(0,212,170,0.2)',borderRadius:'12px',padding:'18px 20px',marginBottom:'16px',display:'flex',alignItems:'center',gap:'14px'}}>
+        <span style={{fontSize:'28px'}}>🏆</span>
+        <div style={{flex:1}}>
+          <p style={{fontSize:'16px',fontWeight:700,color:C.green,marginBottom:'3px'}}>Variante {r.ganador} gana</p>
+          <p style={{fontSize:'12px',color:'#3A6A5A'}}>{r.confianza}% confianza estadística</p>
+        </div>
+        <div style={{textAlign:'right'}}>
+          <div style={{fontSize:'28px',fontWeight:700,color:gB?C.green:C.red}}>{r.uplift_cvr>0?'+':''}{Number(r.uplift_cvr).toFixed(1)}%</div>
+          <div style={{fontSize:'11px',color:'#3A5A4A'}}>uplift CVR</div>
+        </div>
+      </div>
+      <Card style={{marginBottom:'12px'}}>
+        <p style={{...T.label,marginBottom:'10px'}}>Métricas principales</p>
+        {[
+          {name:'Tasa de conversión ⭐',a:(r.cvr_a||0).toFixed(1)+'%',b:(r.cvr_b||0).toFixed(1)+'%',diff:r.uplift_cvr,pos:gB},
+          {name:'Clics en CTA',a:(r.clics_cta_a||0)+'%',b:(r.clics_cta_b||0)+'%',diff:(((r.clics_cta_b-r.clics_cta_a)/(r.clics_cta_a||1))*100).toFixed(1),pos:r.clics_cta_b>r.clics_cta_a},
+          {name:'Tasa de rebote',a:(r.rebote_a||0)+'%',b:(r.rebote_b||0)+'%',diff:(((r.rebote_b-r.rebote_a)/(r.rebote_a||1))*100).toFixed(1),pos:r.rebote_b<r.rebote_a},
+        ].map(m=>(
+          <div key={m.name} style={{display:'flex',alignItems:'center',gap:'10px',padding:'8px 0',borderBottom:`1px solid ${C.border}`}}>
+            <span style={{fontSize:'13px',color:C.txtMid,flex:1}}>{m.name}</span>
+            <span style={{fontSize:'12px',color:C.txtDim}}>A: {m.a}</span>
+            <span style={{fontSize:'14px',fontWeight:600,color:C.white}}>B: {m.b}</span>
+            <span style={{fontSize:'11px',fontWeight:700,padding:'2px 8px',borderRadius:'20px',background:m.pos?C.greenDim:C.redDim,color:m.pos?C.green:C.red}}>{m.diff>0?'+':''}{Number(m.diff).toFixed(1)}%</span>
+          </div>
+        ))}
+      </Card>
+      {r.segmentos&&r.segmentos.length>0&&(
+        <Card style={{marginBottom:'12px'}}>
+          <p style={{...T.label,marginBottom:'10px'}}>Por segmento</p>
+          {r.segmentos.map(sg=>(
+            <div key={sg.nombre} style={{display:'flex',alignItems:'center',gap:'8px',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'12px'}}>
+              <span style={{minWidth:'55px',fontWeight:600,color:C.txt}}>{sg.nombre}</span>
+              <span style={{flex:1,color:C.txtMid}}>{sg.resultado}</span>
+              <Tag color={sg.resultado.toLowerCase().includes('b')?'green':'amber'}>{sg.diff_pct>0?'+':''}{sg.diff_pct}%</Tag>
+            </div>
+          ))}
+        </Card>
+      )}
+      {r.razones_abandono&&r.razones_abandono.length>0&&(
+        <Card style={{marginBottom:'12px'}}>
+          <p style={{...T.label,marginBottom:'10px'}}>Razones de abandono — Variante B</p>
+          {r.razones_abandono.map((ra,i)=>(
+            <div key={i} style={{display:'flex',gap:'8px',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px',color:C.txtMid,lineHeight:'1.6'}}>
+              <span style={{color:C.accent,flexShrink:0,marginTop:'3px'}}>◆</span>{ra}
+            </div>
+          ))}
+        </Card>
+      )}
+      {r.insights&&r.insights.length>0&&(
+        <Card style={{marginBottom:'12px'}}>
+          <p style={{...T.label,marginBottom:'10px'}}>Insights clave</p>
+          {r.insights.map((ins,i)=>(
+            <div key={i} style={{display:'flex',gap:'8px',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px',color:C.txtMid,lineHeight:'1.6'}}>
+              <span style={{color:IC[i]||C.txtDim,flexShrink:0,marginTop:'3px'}}>◆</span>{ins}
+            </div>
+          ))}
+        </Card>
+      )}
+      {r.recomendacion&&(
+        <div style={{background:'#0F0F2A',border:`1px solid rgba(108,99,255,0.2)`,borderRadius:'12px',padding:'16px 18px',display:'flex',gap:'12px'}}>
+          <span style={{fontSize:'18px',flexShrink:0}}>✦</span>
+          <div>
+            <p style={{...T.h3,marginBottom:'4px'}}>Recomendación</p>
+            <p style={{...T.body}}>{r.recomendacion}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── API SCREEN ────────────────────────────────────────────────────────────
+function ApiScreen({onReady}){
+  const [key,setKey]=useState('');
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');
+  async function verify(){
+    setLoading(true);setErr('');
+    try{await callClaude(key,[{role:'user',content:'di ok'}],'Di solo: ok');onReady(key);}
+    catch(e){setErr('Clave inválida: '+e.message);}
+    setLoading(false);
+  }
+  return(
+    <div style={{maxWidth:'400px',margin:'0 auto',padding:'64px 20px'}}>
+      <div style={{textAlign:'center',marginBottom:'32px'}}>
+        <div style={{width:'52px',height:'52px',borderRadius:'13px',background:C.accent,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'24px',margin:'0 auto 16px'}}>⬡</div>
+        <h1 style={{...T.h1,textAlign:'center',marginBottom:'6px'}}>SynthAB</h1>
+        <p style={{...T.body,textAlign:'center'}}>Tests A/B con usuarios sintéticos.<br/>Resultados en minutos, no semanas.</p>
+      </div>
+      <Card>
+        <label style={{...T.label,display:'block',marginBottom:'6px'}}>API Key de Anthropic</label>
+        <input type='password' value={key} onChange={e=>setKey(e.target.value)} placeholder='sk-ant-api03-...' onKeyDown={e=>e.key==='Enter'&&verify()}
+          style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'12px',fontFamily:'monospace',outline:'none',marginBottom:'8px'}}/>
+        {err&&<p style={{color:C.red,fontSize:'12px',marginBottom:'8px'}}>{err}</p>}
+        <p style={{...T.small}}>Consíguela en <a href='https://console.anthropic.com' target='_blank' style={{color:C.accent}}>console.anthropic.com</a> → API Keys</p>
+      </Card>
+      <button onClick={verify} disabled={key.length<20||loading}
+        style={{width:'100%',marginTop:'12px',background:C.accent,color:'#fff',border:'none',borderRadius:'8px',padding:'12px',fontSize:'13px',fontWeight:600,cursor:key.length<20?'not-allowed':'pointer',opacity:key.length<20?0.4:1}}>
+        {loading?'Verificando...':'Entrar →'}
       </button>
     </div>
   );
 }
 
-const SECTORES = [
-  {value:"moda",label:"Moda"},
-  {value:"hogar",label:"Hogar"},
-  {value:"electronica",label:"Electrónica"},
-  {value:"belleza",label:"Belleza"},
-  {value:"alimentacion",label:"Alimentación"},
-  {value:"deporte",label:"Deporte"},
-  {value:"turismo",label:"Turismo ✈️"},
-  {value:"servicios",label:"Servicios / SaaS"},
-];
+// ── APP ───────────────────────────────────────────────────────────────────
+function App(){
+  const [apiKey,setApiKey]=useState('');
+  const [nav,setNav]=useState('projects');
+  const [projects,setProjects]=useState([PILOT_PROJECT]);
+  const [view,setView]=useState({screen:'list'});
 
-const CSV_EJEMPLO = {
-  turismo: "edad,genero,dispositivo,ciudad,canal,tipo_viaje,cvr\n18-24,mujer,mobile,Madrid,Instagram,vacaciones,0.021\n25-34,pareja,mobile,Barcelona,Google Ads,luna_de_miel,0.038\n25-34,hombre,desktop,Madrid,Organico,negocios,0.045\n35-44,familia,desktop,Valencia,Email,vacaciones,0.062\n45-54,mujer,desktop,Sevilla,Email,cultural,0.057\n55+,pareja,desktop,Bilbao,Directo,relax,0.031",
-  default: "edad,genero,dispositivo,ciudad,canal,cvr\n18-24,mujer,mobile,Madrid,Instagram,0.028\n25-34,mujer,mobile,Madrid,Organico,0.041\n25-34,hombre,desktop,Barcelona,Google Ads,0.038\n35-44,mujer,desktop,Valencia,Email,0.058\n45-54,mujer,desktop,Sevilla,Email,0.061\n55+,hombre,desktop,Madrid,Directo,0.021"
-};
-
-function StepData({onNext}) {
-  const [drag,setDrag] = useState(false);
-  const [csvData,setCsvData] = useState(null); // { headers, rows, raw }
-  const [fileName,setFileName] = useState("");
-  const [sector,setSector] = useState("moda");
-  const [mode,setMode] = useState("upload");
-  const [manual,setManual] = useState("");
-  const [error,setError] = useState("");
-  const ref = useRef();
-
-  function handleFile(f) {
-    if(!f) return;
-    setError(""); setFileName(f.name);
-    const r = new FileReader();
-    r.onload = function(e) {
-      const parsed = parseCSV(e.target.result);
-      if(!parsed) { setError("No se pudo leer el CSV. Comprueba el formato."); return; }
-      setCsvData(parsed);
-    };
-    r.onerror = function() { setError("Error leyendo el archivo."); };
-    r.readAsText(f, "UTF-8");
-  }
-
-  function usarEjemplo() {
-    const raw = CSV_EJEMPLO[sector] || CSV_EJEMPLO.default;
-    const parsed = parseCSV(raw);
-    setCsvData(parsed);
-    setFileName("datos_ejemplo_"+sector+".csv");
-    setError("");
-  }
-
-  const dataFinal = mode==="upload" ? (csvData ? csvData.raw : null) : (manual.trim() || null);
-  const ok = !!dataFinal;
-
-  return (
-    <div>
-      <p style={s.title}>Paso 1 — Datos del cliente</p>
-      <p style={s.sub}>Carga el export de GA4 (CSV) o pega los datos manualmente. Cuantas más fuentes, mejores serán los perfiles sintéticos.</p>
-
-      <div style={s.card}>
-        <label style={s.label}>Sector del ecommerce</label>
-        <select style={s.sel} value={sector} onChange={e=>setSector(e.target.value)}>
-          {SECTORES.map(sec=><option key={sec.value} value={sec.value}>{sec.label}</option>)}
-        </select>
+  if(!apiKey) return(
+    <div style={{background:C.bg,minHeight:'100vh'}}>
+      <div style={{borderBottom:`1px solid ${C.border}`,padding:'14px 28px',background:'#0A0A16',display:'flex',alignItems:'center',gap:'8px'}}>
+        <div style={{width:'28px',height:'28px',borderRadius:'7px',background:C.accent,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'14px'}}>⬡</div>
+        <span style={{fontSize:'14px',fontWeight:700,color:C.white}}>SynthAB</span>
       </div>
-
-      <div style={s.card}>
-        <div style={{display:"flex",gap:"8px",marginBottom:"14px"}}>
-          <button onClick={()=>{setMode("upload");setError("");}} style={{...s.btnO,borderColor:mode==="upload"?ACCENT:"#2A2A3E",color:mode==="upload"?"#fff":"#8B8BCC"}}>📂 Subir CSV</button>
-          <button onClick={()=>{setMode("manual");setError("");}} style={{...s.btnO,borderColor:mode==="manual"?ACCENT:"#2A2A3E",color:mode==="manual"?"#fff":"#8B8BCC"}}>✏️ Pegar datos</button>
-        </div>
-
-        {mode==="upload" ? (
-          <div>
-            <div style={s.upload(drag)}
-              onDragOver={e=>{e.preventDefault();setDrag(true);}}
-              onDragLeave={()=>setDrag(false)}
-              onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}}
-              onClick={()=>ref.current.click()}>
-              <input ref={ref} type="file" accept=".csv,.txt" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
-              <div style={{fontSize:"24px",marginBottom:"8px"}}>📊</div>
-              {fileName
-                ? <p style={{color:ACCENT2,fontWeight:"600",fontSize:"13px"}}>{fileName}</p>
-                : <p style={{fontSize:"13px",color:"#6B6B9A"}}>Arrastra tu CSV de GA4 aquí o haz clic</p>
-              }
-              <p style={{fontSize:"11px",color:"#3E3E5E",marginTop:"5px"}}>Formatos: .csv — separador coma o punto y coma</p>
-            </div>
-            {csvData && (
-              <div style={s.infoBox}>
-                ✓ CSV leído: <strong style={{color:ACCENT2}}>{csvData.rows.length} filas</strong>, columnas: <span style={{color:"#9B99CC"}}>{csvData.headers.join(", ")}</span>
-              </div>
-            )}
-            {error && <p style={{color:"#FF6B6B",fontSize:"12px",marginTop:"8px"}}>⚠ {error}</p>}
-          </div>
-        ) : (
-          <div>
-            <textarea style={{...s.ta,minHeight:"110px",fontFamily:"monospace",fontSize:"12px"}} value={manual} onChange={e=>setManual(e.target.value)} placeholder={`Pega aquí el CSV. Ejemplo:\nedad,genero,dispositivo,ciudad,canal,cvr\n18-24,mujer,mobile,Madrid,Instagram,0.028\n25-34,hombre,desktop,Barcelona,Organico,0.041`}/>
-            <p style={{fontSize:"11px",color:"#3E3E5E",marginTop:"4px"}}>Incluye cabecera en la primera fila. La columna cvr es la tasa de conversión por segmento.</p>
-          </div>
-        )}
-
-        <div style={{marginTop:"10px",display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
-          <button onClick={usarEjemplo} style={{...s.btnO,fontSize:"12px",padding:"6px 12px"}}>Usar datos de ejemplo ({sector})</button>
-          {mode==="upload" && <p style={{fontSize:"11px",color:"#3E3E5E"}}>— o —</p>}
-        </div>
-      </div>
-
-      <div style={{...s.card,borderColor:"#1A1A35"}}>
-        <p style={{fontSize:"12px",color:"#4A4A6A",marginBottom:"4px"}}>💡 ¿Qué datos necesito de GA4?</p>
-        <p style={{fontSize:"12px",color:"#3E3E5E",lineHeight:"1.7"}}>
-          Exporta desde <strong style={{color:"#6B6B9A"}}>Explorar → Exploración en blanco</strong>: añade dimensiones (edad, género, ciudad, dispositivo, canal) y métricas (sesiones, conversiones, tasa de rebote). Exporta como CSV.
-        </p>
-      </div>
-
-      <div style={s.btnRow}>
-        <button style={{...s.btn,opacity:ok?1:0.4}} disabled={!ok} onClick={()=>onNext({data:dataFinal,sector})}>
-          Generar perfiles →
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const PROMPT_ANALISIS = `Eres un experto en investigación de usuarios y analítica web.
-Te paso los datos de tráfico de un ecommerce de {{SECTOR}}.
-
-Analiza estos datos y extrae:
-1. Distribución demográfica real (% por edad, género, ubicación)
-2. Distribución de dispositivos (% mobile/desktop/tablet)
-3. Comportamiento típico por segmento
-4. Canal de adquisición predominante por perfil
-5. Tasa de conversión por segmento si está disponible
-
-DATOS DEL CLIENTE:
-[CSV exportado de GA4]
-
-Responde en formato JSON estructurado con distribuciones porcentuales.`;
-
-const PROMPT_PERFILES = `Basándote en estas distribuciones reales de un ecommerce de {{SECTOR}}:
-
-DISTRIBUCIONES: [JSON del análisis previo]
-
-Genera {{N}} perfiles de usuarios sintéticos que:
-- Respeten EXACTAMENTE las distribuciones porcentuales
-- Sean internamente coherentes (ej: usuario 55+ con baja madurez digital, dispositivo desktop)
-- Incluyan: id, edad, género, ciudad, dispositivo, madurez_tecnologica (1-5),
-  canal_entrada, tipo (nuevo/recurrente), probabilidad_conversion (0.0-1.0)
-
-El atributo probabilidad_conversion es el más crítico: debe venir de los CVR
-reales del cliente por segmento. Si lo inventa la IA, los resultados no valen.
-
-Responde SOLO con un array JSON válido.`;
-
-const PROMPT_VALIDACION = `Revisa estos {{N}} perfiles sintéticos y verifica:
-1. ¿Las distribuciones coinciden con el objetivo? (tolerancia ±2%)
-2. ¿Hay perfiles internamente incoherentes?
-3. ¿La media de probabilidad_conversion coincide con el CVR real del cliente?
-
-CVR REAL DEL CLIENTE: [X%]
-
-Si hay problemas, corrígelos y devuelve el array corregido.`;
-
-function StepPerfiles({input, apiKey, onNext, onBack}) {
-  const [loading,setLoading] = useState(false);
-  const [profiles,setProfiles] = useState(null);
-  const [n,setN] = useState(20);
-  const [err,setErr] = useState("");
-
-  async function generar() {
-    setLoading(true); setErr("");
-    try {
-      const prompt = `Eres un experto en analítica web y CRO.
-Analiza estos datos de un ecommerce de ${input.sector} y genera exactamente ${n} perfiles sintéticos.
-
-DATOS DEL CLIENTE (CSV):
-${input.data}
-
-Instrucciones:
-- Analiza las distribuciones reales de los datos (edad, género, dispositivo, canal, CVR)
-- Genera ${n} perfiles que respeten EXACTAMENTE esas distribuciones
-- Sé internamente coherente: usuario 55+ → madurez baja → desktop
-- El campo prob_conversion DEBE venir de los CVR reales del CSV por segmento
-- Incluye: id (3 dígitos), edad, genero, ciudad, dispositivo, madurez (1-5), canal, tipo (nuevo/recurrente), prob_conversion (decimal), initials (2 letras mayúsculas)
-
-Responde SOLO con un array JSON válido, sin texto adicional ni markdown.
-Ejemplo de un perfil: {"id":"001","edad":"25-34","genero":"mujer","ciudad":"Madrid","dispositivo":"mobile","madurez":4,"canal":"Instagram","tipo":"recurrente","prob_conversion":0.041,"initials":"MG"}`;
-
-      const raw = await callClaude(apiKey,[{role:"user",content:prompt}],
-        "Eres un generador de perfiles sintéticos. Responde SOLO con JSON válido, sin texto extra ni bloques de código.");
-      setProfiles(parseJSON(raw));
-    } catch(e) { setErr("Error: "+e.message); }
-    setLoading(false);
-  }
-
-  if(loading) return <Spinner text="Generando perfiles sintéticos..." sub="La IA analiza las distribuciones reales de tus datos"/>;
-
-  if(profiles) return (
-    <div>
-      <p style={s.title}>Perfiles sintéticos generados</p>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}}>
-        <span style={s.tag("green")}>{profiles.length} perfiles · sector {input.sector}</span>
-        <button style={{...s.btnO,fontSize:"11px",padding:"4px 9px"}} onClick={()=>setProfiles(null)}>Regenerar</button>
-      </div>
-      <div style={{maxHeight:"400px",overflowY:"auto",marginBottom:"12px"}}>
-        {profiles.slice(0,8).map(function(p,i){ return (
-          <div key={p.id} style={s.pCard}>
-            <div style={{display:"flex",alignItems:"center",gap:"9px",marginBottom:"9px"}}>
-              <div style={s.av(AVATARS[i%5])}>{p.initials||"P"+(i+1)}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:"13px",fontWeight:"600",color:"#E8E6FF"}}>Perfil #{p.id}</div>
-                <div style={{fontSize:"11px",color:"#6B6B9A"}}>{p.edad} · {p.genero} · {p.tipo}</div>
-              </div>
-              <span style={s.tag(p.prob_conversion>0.05?"green":"amber")}>CVR {(p.prob_conversion*100).toFixed(1)}%</span>
-            </div>
-            <div style={s.attrG}>
-              {[["Ciudad",p.ciudad],["Dispositivo",p.dispositivo],["Canal",p.canal],["Madurez",p.madurez+"/5"]].map(kv=>(
-                <div key={kv[0]} style={s.attr}>
-                  <div style={{fontSize:"10px",color:"#4A4A6A"}}>{kv[0]}</div>
-                  <div style={{fontSize:"12px",color:"#C8C6FF",fontWeight:"500"}}>{kv[1]}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );})}
-        {profiles.length>8 && <p style={{fontSize:"12px",color:"#4A4A6A",textAlign:"center",padding:"8px"}}>+ {profiles.length-8} perfiles más</p>}
-      </div>
-      <div style={{...s.card,borderColor:"#1A1A35",padding:"12px 14px"}}>
-        <p style={{fontSize:"12px",color:"#4A4A6A",marginBottom:"3px"}}>🔑 Por qué importa <code style={{color:ACCENT2}}>prob_conversion</code></p>
-        <p style={{fontSize:"12px",color:"#3E3E5E",lineHeight:"1.6"}}>Este atributo ancla la simulación a la realidad. Si viene de los CVR reales de tus segmentos, los resultados del test tienen sentido. Si lo inventa la IA sin datos reales, los resultados no valen nada.</p>
-      </div>
-      <PromptViewer title="Generación de perfiles (Paso A+B del pipeline)" prompt={PROMPT_PERFILES}/>
-      <div style={s.btnRow}>
-        <button style={s.btnO} onClick={()=>{setProfiles(null);onBack();}}>Atrás</button>
-        <button style={s.btn} onClick={()=>onNext(profiles)}>Configurar test →</button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div>
-      <p style={s.title}>Paso 2 — Perfiles sintéticos</p>
-      <p style={s.sub}>La IA analiza tus datos y genera usuarios que respetan las distribuciones reales de tu ecommerce.</p>
-
-      <div style={s.card}>
-        <p style={{fontSize:"13px",color:"#9B99CC",marginBottom:"10px",lineHeight:"1.6"}}>
-          Datos cargados del sector <strong style={{color:ACCENT2}}>{input.sector}</strong>. La IA analizará las distribuciones reales y generará los perfiles.
-        </p>
-        <label style={s.label}>Número de perfiles</label>
-        <select style={s.sel} value={n} onChange={e=>setN(Number(e.target.value))}>
-          <option value={10}>10 perfiles — prueba rápida</option>
-          <option value={20}>20 perfiles — recomendado para demo</option>
-          <option value={50}>50 perfiles — más representativo</option>
-        </select>
-        <div style={s.infoBox}>
-          📊 En producción: tráfico &lt;10k/mes → 1.000 perfiles · 10k-100k → 5.000 · &gt;100k → 10.000
-        </div>
-        {err && <p style={{color:"#FF6B6B",fontSize:"12px",marginTop:"8px"}}>⚠ {err}</p>}
-      </div>
-
-      <PromptViewer title="Análisis de datos (Prompt A)" prompt={PROMPT_ANALISIS}/>
-      <PromptViewer title="Generación de perfiles (Prompt B)" prompt={PROMPT_PERFILES}/>
-      <PromptViewer title="Validación de coherencia (Prompt C)" prompt={PROMPT_VALIDACION}/>
-
-      <div style={s.btnRow}>
-        <button style={s.btnO} onClick={onBack}>Atrás</button>
-        <button style={s.btn} onClick={generar}>Generar perfiles</button>
-      </div>
-    </div>
-  );
-}
-
-const PROMPT_SIMULACION = `Eres un usuario real navegando un ecommerce. Tu perfil es:
-{{PERFIL_JSON}}
-
-Estás en: {{URL}}
-Página: {{PAGINA}}
-Sector: {{SECTOR}}
-Variante que ves: {{VARIANTE_A_o_B}}
-Descripción del cambio: {{DESCRIPCION_VARIANTE}}
-
-Datos históricos de comportamiento de usuarios como tú:
-CVR medio tu segmento: {{CVR}}%
-Scroll depth típico: {{SCROLL}}%
-Tiempo medio en página: {{TIEMPO}}s
-
-Simula tu sesión y devuelve SOLO este JSON:
-{
-  "hizo_scroll": true/false,
-  "pct_scroll": 0-100,
-  "clicks_cta": 0-3,
-  "añadio_carrito": true/false,
-  "tiempo_sesion_seg": número,
-  "convirtio": true/false,
-  "razon_abandono": "texto o null"
-}`;
-
-function StepTest({sector, onNext, onBack}) {
-  const [hip,setHip] = useState("");
-  const [url,setUrl] = useState("");
-  const [pag,setPag] = useState("página de producto");
-  const [varA,setVarA] = useState("");
-  const [varB,setVarB] = useState("");
-  const [met,setMet] = useState("tasa de conversión");
-  const [split,setSplit] = useState(50);
-
-  const esTurismo = sector==="turismo";
-
-  const paginas = esTurismo
-    ? ["ficha de hotel","ficha de vuelo","página de paquete turístico","homepage","resultados de búsqueda","checkout / pago","landing de destino"]
-    : ["página de producto","homepage","checkout","categoría","carrito","landing de campaña"];
-
-  const metricas = esTurismo
-    ? ["tasa de conversión","clics en CTA","tasa de rebote","tiempo en página","inicio de reserva","completación de reserva"]
-    : ["tasa de conversión","clics en CTA","tasa de rebote","tiempo en página","añadidos al carrito"];
-
-  const ok = varA && varB && hip && url;
-
-  return (
-    <div>
-      <p style={s.title}>Paso 3 — Configurar test A/B</p>
-      <p style={s.sub}>Define qué página testás, la hipótesis y las dos variantes que van a competir.</p>
-
-      <div style={s.card}>
-        <label style={s.label}>URL de la página a testar *</label>
-        <input style={s.inp} value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://tienda.com/producto/zapatillas-running"/>
-        <p style={{fontSize:"11px",color:"#3E3E5E",marginTop:"5px"}}>La IA usará esta URL para entender el contexto de la página y simular el comportamiento de los usuarios.</p>
-      </div>
-
-      <div style={s.card}>
-        <label style={s.label}>Página o sección testada</label>
-        <select style={s.sel} value={pag} onChange={e=>setPag(e.target.value)}>
-          {paginas.map(p=><option key={p}>{p}</option>)}
-        </select>
-      </div>
-
-      <div style={s.card}>
-        <label style={s.label}>Hipótesis del test</label>
-        <textarea style={s.ta} value={hip} onChange={e=>setHip(e.target.value)}
-          placeholder={esTurismo
-            ? "Ej: Creemos que cambiar el CTA de 'Reservar' a 'Ver disponibilidad' reducirá la fricción percibida y aumentará los clics en un 8% en usuarios móvil porque elimina el compromiso implícito de la palabra 'reservar'."
-            : "Ej: Creemos que cambiar el CTA de 'Añadir al carrito' a 'Comprar ahora' aumentará la conversión en un 6-9% en usuarios mobile porque reduce pasos percibidos."}/>
-        <p style={{fontSize:"11px",color:"#3E3E5E",marginTop:"5px"}}>Buena hipótesis = cambio propuesto + efecto esperado + razón del por qué.</p>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
-        <div style={s.card}>
-          <div style={{marginBottom:"9px"}}><span style={s.tag("purple")}>Variante A — Control</span></div>
-          <label style={s.label}>Descripción actual</label>
-          <input style={s.inp} value={varA} onChange={e=>setVarA(e.target.value)}
-            placeholder={esTurismo?"Ej: Botón azul 'Reservar ahora'":"Ej: Botón azul 'Añadir al carrito'"}/>
-        </div>
-        <div style={s.card}>
-          <div style={{marginBottom:"9px"}}><span style={s.tag("green")}>Variante B — Cambio</span></div>
-          <label style={s.label}>Descripción del cambio</label>
-          <input style={s.inp} value={varB} onChange={e=>setVarB(e.target.value)}
-            placeholder={esTurismo?"Ej: Botón verde 'Ver disponibilidad' + badge urgencia":"Ej: Botón verde 'Comprar ahora — Envío gratis'"}/>
-        </div>
-      </div>
-
-      <div style={s.card}>
-        <label style={s.label}>Métrica principal (la decisiva)</label>
-        <select style={s.sel} value={met} onChange={e=>setMet(e.target.value)}>
-          {metricas.map(m=><option key={m}>{m}</option>)}
-        </select>
-        <div style={{marginTop:"14px"}}>
-          <label style={s.label}>Split: A {split}% / B {100-split}%</label>
-          <input type="range" min="10" max="90" step="5" value={split} onChange={e=>setSplit(Number(e.target.value))} style={{width:"100%",accentColor:ACCENT}}/>
-          <p style={{fontSize:"11px",color:"#3E3E5E",marginTop:"4px"}}>Para tests exploratorios usa 50/50. Si quieres proteger el tráfico actual usa 80/20.</p>
-        </div>
-      </div>
-
-      {!ok && (url===""||hip===""||varA===""||varB==="") && (
-        <p style={{fontSize:"12px",color:"#F5A623",marginBottom:"8px"}}>
-          ⚠ Faltan: {[!url&&"URL",!hip&&"hipótesis",!varA&&"variante A",!varB&&"variante B"].filter(Boolean).join(", ")}
-        </p>
-      )}
-
-      <div style={s.btnRow}>
-        <button style={s.btnO} onClick={onBack}>Atrás</button>
-        <button style={{...s.btn,opacity:ok?1:0.4}} disabled={!ok}
-          onClick={()=>onNext({hipotesis:hip,url,pagina:pag,varA,varB,metrica:met,split})}>
-          Lanzar simulación →
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function StepSim({profiles, test, input, apiKey, onNext, onBack}) {
-  const [loading,setLoading] = useState(false);
-  const [done,setDone] = useState(false);
-  const [res,setRes] = useState(null);
-  const [err,setErr] = useState("");
-
-  async function simular() {
-    setLoading(true); setErr("");
-    try {
-      const sample = profiles.slice(0,Math.min(15,profiles.length)).map(p=>({
-        id:p.id, edad:p.edad, genero:p.genero, dispositivo:p.dispositivo,
-        madurez:p.madurez, canal:p.canal, tipo:p.tipo, prob_conversion:p.prob_conversion
-      }));
-
-      const prompt = `Eres el motor de simulación A/B de SynthAB. Simula cómo estos ${sample.length} perfiles interactúan con las dos variantes de una página web.
-
-URL DE LA PÁGINA: ${test.url}
-PÁGINA: ${test.pagina}
-SECTOR: ${input.sector}
-HIPÓTESIS: ${test.hipotesis}
-
-VARIANTE A (control): ${test.varA}
-VARIANTE B (cambio propuesto): ${test.varB}
-MÉTRICA PRINCIPAL: ${test.metrica}
-SPLIT: ${test.split}% A / ${100-test.split}% B
-
-PERFILES SINTÉTICOS:
-${JSON.stringify(sample,null,2)}
-
-LÓGICA DE DECISIÓN de cada agente:
-P(acción) = perfil_base × modificador_variante × contexto_histórico
-
-Donde:
-- perfil_base: edad, género, madurez tecnológica, dispositivo, canal, prob_conversion
-- modificador_variante: cómo afecta cada variante a este tipo de usuario (B puede mejorar o empeorar según el perfil)
-- contexto_histórico: CVR real del segmento
-
-IMPORTANTE:
-- Variante B NO gana automáticamente — el modificador puede ir en cualquier dirección según el perfil
-- Usuarios mayores con baja madurez digital pueden responder peor a cambios disruptivos
-- Usuarios mobile con alta intención responden bien a CTAs directos
-
-Devuelve SOLO este JSON (sin texto adicional ni markdown):
-{
-  "ganador": "A" o "B",
-  "confianza": número 60-99,
-  "uplift_cvr": número con decimal (puede ser negativo si gana A),
-  "cvr_a": número con 1 decimal,
-  "cvr_b": número con 1 decimal,
-  "clics_cta_a": número,
-  "clics_cta_b": número,
-  "rebote_a": número,
-  "rebote_b": número,
-  "segmentos": [{"nombre":"18-24","resultado":"B gana","diff_pct":22}],
-  "razones_abandono": ["razón 1 extraída de los agentes que no convirtieron"],
-  "insights": ["insight 1 sobre qué segmentos responden mejor","insight 2 sobre qué puede mejorarse"],
-  "recomendacion": "texto de recomendación accionable para el cliente"
-}`;
-
-      const raw = await callClaude(apiKey,[{role:"user",content:prompt}],
-        "Eres un motor de simulación A/B. Analiza los perfiles y simula resultados realistas basados en los datos. Responde SOLO con JSON válido.");
-      setRes(parseJSON(raw));
-      setDone(true);
-    } catch(e) { setErr("Error en simulación: "+e.message); }
-    setLoading(false);
-  }
-
-  if(loading) return <Spinner text={`Simulando ${profiles.length} agentes en paralelo...`} sub="Cada agente navega su variante según su perfil y los datos históricos"/>;
-
-  if(done) return (
-    <div>
-      <div style={{textAlign:"center",padding:"24px"}}>
-        <div style={{fontSize:"36px",marginBottom:"12px"}}>✓</div>
-        <p style={{fontSize:"15px",fontWeight:"600",color:ACCENT2,marginBottom:"5px"}}>Simulación completada</p>
-        <p style={{fontSize:"13px",color:"#4A4A6A"}}>{profiles.length} agentes · {test.varA} vs {test.varB}</p>
-      </div>
-      <div style={s.btnRow}>
-        <button style={s.btnO} onClick={()=>{setDone(false);setRes(null);}}>Repetir</button>
-        <button style={s.btn} onClick={()=>onNext(res)}>Ver resultados →</button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div>
-      <p style={s.title}>Paso 4 — Simulación</p>
-      <p style={s.sub}>Los agentes sintéticos navegan su variante asignada y deciden basándose en su perfil + datos históricos.</p>
-
-      <div style={s.card}>
-        <p style={{fontSize:"12px",color:"#6B6B9A",marginBottom:"12px",lineHeight:"1.6"}}>
-          <strong style={{color:"#9B99CC"}}>{profiles.length} agentes</strong> distribuidos: {test.split}% verán la variante A, {100-test.split}% la variante B.
-        </p>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"14px"}}>
-          <div style={{background:"#0A0A14",borderRadius:"8px",padding:"11px 13px",border:"1px solid rgba(108,99,255,0.2)"}}>
-            <div style={{fontSize:"11px",fontWeight:"700",color:ACCENT,marginBottom:"3px"}}>Variante A — Control</div>
-            <div style={{fontSize:"13px",color:"#C8C6FF"}}>{test.varA}</div>
-          </div>
-          <div style={{background:"#0A0A14",borderRadius:"8px",padding:"11px 13px",border:"1px solid rgba(0,212,170,0.2)"}}>
-            <div style={{fontSize:"11px",fontWeight:"700",color:ACCENT2,marginBottom:"3px"}}>Variante B — Cambio</div>
-            <div style={{fontSize:"13px",color:"#C8C6FF"}}>{test.varB}</div>
-          </div>
-        </div>
-        <div style={s.infoBox}>
-          🔗 URL testada: <span style={{color:ACCENT2,fontFamily:"monospace",fontSize:"11px"}}>{test.url}</span>
-        </div>
-        {err && <p style={{color:"#FF6B6B",fontSize:"12px",marginTop:"8px"}}>⚠ {err}</p>}
-      </div>
-
-      <PromptViewer title="Motor de decisión de cada agente (Paso 04 del pipeline)" prompt={PROMPT_SIMULACION}/>
-
-      <div style={{...s.card,borderColor:"#1A1A35",padding:"12px 14px"}}>
-        <p style={{fontSize:"12px",color:"#4A4A6A",marginBottom:"3px"}}>⚡ Cada agente es una llamada independiente a la API</p>
-        <p style={{fontSize:"12px",color:"#3E3E5E",lineHeight:"1.6"}}>Con 5.000 perfiles son 5.000 llamadas — se ejecutan en paralelo para tardar minutos, no horas. Esto es lo que más coste computacional tiene del producto.</p>
-      </div>
-
-      <div style={s.btnRow}>
-        <button style={s.btnO} onClick={onBack}>Atrás</button>
-        <button style={s.btn} onClick={simular}>Lanzar simulación</button>
-      </div>
-    </div>
-  );
-}
-
-function StepResultados({results, test}) {
-  const r = results;
-  const t = test;
-  const gB = r.ganador==="B";
-  const IC = [ACCENT2,"#F5A623","#FF6B6B","#6C63FF"];
-
-  function copiar() {
-    const txt = `RESULTADOS TEST A/B — SynthAB\n\nURL testada: ${t.url}\nPágina: ${t.pagina}\nHipótesis: ${t.hipotesis}\n\nVariante A: ${t.varA}\nVariante B: ${t.varB}\n\nGanador: Variante ${r.ganador}\nUplift CVR: ${r.uplift_cvr>0?"+":""}${Number(r.uplift_cvr).toFixed(1)}%\nConfianza estadística: ${r.confianza}%\nCVR A: ${r.cvr_a}% / CVR B: ${r.cvr_b}%\n\nRecomendación:\n${r.recomendacion}`;
-    navigator.clipboard.writeText(txt).then(()=>alert("Copiado al portapapeles ✓"));
-  }
-
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px",flexWrap:"wrap",gap:"8px"}}>
-        <div>
-          <p style={{...s.title,marginBottom:"3px"}}>Resultados del test</p>
-          <p style={{fontSize:"12px",color:"#4A4A6A",fontFamily:"monospace"}}>{t.url}</p>
-        </div>
-        <button style={{...s.btnO,fontSize:"12px",padding:"7px 12px"}} onClick={copiar}>Copiar resultados</button>
-      </div>
-
-      <div style={s.winner}>
-        <div style={{width:"46px",height:"46px",borderRadius:"50%",background:"rgba(0,212,170,0.1)",border:"1px solid rgba(0,212,170,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",flexShrink:0}}>🏆</div>
-        <div style={{flex:1}}>
-          <div style={{fontSize:"15px",fontWeight:"700",color:ACCENT2,marginBottom:"3px"}}>
-            Variante {r.ganador} gana — {r.ganador==="B"?t.varB:t.varA}
-          </div>
-          <div style={{fontSize:"12px",color:"#3A6A5A"}}>{r.confianza}% de confianza estadística</div>
-        </div>
-        <div style={{textAlign:"right",flexShrink:0}}>
-          <div style={{fontSize:"26px",fontWeight:"700",color:gB?ACCENT2:"#FF6B6B"}}>
-            {r.uplift_cvr>0?"+":""}{Number(r.uplift_cvr).toFixed(1)}%
-          </div>
-          <div style={{fontSize:"11px",color:"#3A5A4A"}}>uplift CVR</div>
-        </div>
-      </div>
-
-      <div style={s.card}>
-        <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 8px"}}>Métricas principales</p>
-        {[
-          {name:"Tasa de conversión ⭐",a:(r.cvr_a||0).toFixed(1)+"%",b:(r.cvr_b||0).toFixed(1)+"%",diff:r.uplift_cvr,pos:gB},
-          {name:"Clics en CTA",a:(r.clics_cta_a||0)+"%",b:(r.clics_cta_b||0)+"%",diff:(((r.clics_cta_b-r.clics_cta_a)/(r.clics_cta_a||1))*100).toFixed(1),pos:r.clics_cta_b>r.clics_cta_a},
-          {name:"Tasa de rebote",a:(r.rebote_a||0)+"%",b:(r.rebote_b||0)+"%",diff:(((r.rebote_b-r.rebote_a)/(r.rebote_a||1))*100).toFixed(1),pos:r.rebote_b<r.rebote_a}
-        ].map(m=>(
-          <div key={m.name} style={s.mRow}>
-            <span style={{fontSize:"13px",color:"#9B99CC",flex:1}}>{m.name}</span>
-            <span style={{fontSize:"12px",color:"#5A5A8A",marginRight:"4px"}}>A: {m.a}</span>
-            <span style={{fontSize:"14px",fontWeight:"600",color:"#fff"}}>B: {m.b}</span>
-            <span style={{fontSize:"11px",fontWeight:"700",padding:"2px 8px",borderRadius:"20px",background:m.pos?"#0D2E22":"#2E0D0D",color:m.pos?ACCENT2:"#FF6B6B"}}>{m.diff>0?"+":""}{Number(m.diff).toFixed(1)}%</span>
-          </div>
-        ))}
-      </div>
-
-      {r.segmentos && r.segmentos.length>0 && (
-        <div style={s.card}>
-          <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 8px"}}>Resultados por segmento</p>
-          {r.segmentos.map(sg=>(
-            <div key={sg.nombre} style={s.sRow}>
-              <span style={{minWidth:"60px",fontWeight:"600",color:"#C8C6FF"}}>{sg.nombre}</span>
-              <span style={{flex:1}}>{sg.resultado}</span>
-              <span style={s.tag(sg.resultado.includes("B")?"green":"amber")}>{sg.diff_pct>0?"+":""}{sg.diff_pct}%</span>
-            </div>
-          ))}
-          <p style={{fontSize:"11px",color:"#3E3E5E",marginTop:"8px"}}>ℹ️ Variante B no gana en todos los segmentos. Los usuarios 45+ con baja madurez digital pueden responder peor a cambios disruptivos.</p>
-        </div>
-      )}
-
-      {r.razones_abandono && r.razones_abandono.length>0 && (
-        <div style={s.card}>
-          <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 8px"}}>Principales razones de abandono — Variante B</p>
-          <p style={{fontSize:"11px",color:"#3E3E5E",marginBottom:"8px"}}>Extraídas automáticamente de los agentes que no convirtieron:</p>
-          {r.razones_abandono.map((ra,i)=>(
-            <div key={i} style={s.iRow}>
-              <div style={{width:"7px",height:"7px",borderRadius:"50%",background:ACCENT,flexShrink:0,marginTop:"6px"}}/>
-              {ra}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {r.insights && r.insights.length>0 && (
-        <div style={s.card}>
-          <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 8px"}}>Insights clave</p>
-          {r.insights.map((ins,i)=>(
-            <div key={i} style={s.iRow}>
-              <div style={{width:"7px",height:"7px",borderRadius:"50%",background:IC[i]||"#6B6B9A",flexShrink:0,marginTop:"6px"}}/>
-              {ins}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {r.recomendacion && (
-        <div style={{background:"#0F0F2A",border:"1px solid rgba(108,99,255,0.2)",borderRadius:"12px",padding:"16px 18px",marginBottom:"16px",display:"flex",gap:"12px"}}>
-          <div style={{fontSize:"18px",flexShrink:0}}>✦</div>
-          <div>
-            <p style={{fontSize:"13px",fontWeight:"600",color:"#C8C6FF",margin:"0 0 4px"}}>Recomendación del sistema</p>
-            <p style={{fontSize:"13px",color:"#8B8BCC",margin:0,lineHeight:"1.7"}}>{r.recomendacion}</p>
-          </div>
-        </div>
-      )}
-
-      <div style={{...s.card,borderColor:"#1A2030",padding:"12px 14px"}}>
-        <p style={{fontSize:"12px",color:"#4A5A7A",marginBottom:"3px"}}>⚙️ Paso 6 — Validación y calibración</p>
-        <p style={{fontSize:"12px",color:"#3E4A5E",lineHeight:"1.6"}}>Cuando implementes la variante ganadora en producción, compara los resultados reales con esta predicción. Cada proyecto calibra el modelo y lo hace más preciso para el siguiente cliente.</p>
-      </div>
-
-      <div style={s.btnRow}>
-        <button style={s.btnG} onClick={()=>window.location.reload()}>Nuevo test</button>
-      </div>
-    </div>
-  );
-}
-
-function App() {
-  const [apiKey,setApiKey] = useState("");
-  const [step,setStep] = useState(0);
-  const [dataInput,setDataInput] = useState(null);
-  const [profiles,setProfiles] = useState([]);
-  const [testConfig,setTestConfig] = useState(null);
-  const [results,setResults] = useState(null);
-
-  if(!apiKey) return (
-    <div>
-      <div style={s.header}><div style={s.logo}><div style={s.dot}/>SynthAB</div></div>
       <ApiScreen onReady={setApiKey}/>
     </div>
   );
 
-  return (
-    <div>
-      <div style={s.header}>
-        <div style={s.logo}><div style={s.dot}/>SynthAB<span style={{fontSize:"11px",color:"#4A4A6A",fontWeight:"400",marginLeft:"6px"}}>v0.2 · piloto</span></div>
-        <button style={{...s.btnO,fontSize:"11px",padding:"4px 9px"}} onClick={()=>setApiKey("")}>Cambiar API key</button>
-      </div>
-      <StepBar cur={step}/>
-      <div style={s.main}>
-        {step===0 && <StepData onNext={d=>{setDataInput(d);setStep(1);}}/>}
-        {step===1 && <StepPerfiles input={dataInput} apiKey={apiKey} onNext={p=>{setProfiles(p);setStep(2);}} onBack={()=>setStep(0)}/>}
-        {step===2 && <StepTest sector={dataInput&&dataInput.sector} onNext={t=>{setTestConfig(t);setStep(3);}} onBack={()=>setStep(1)}/>}
-        {step===3 && <StepSim profiles={profiles} test={testConfig} input={dataInput} apiKey={apiKey} onNext={r=>{setResults(r);setStep(4);}} onBack={()=>setStep(2)}/>}
-        {step===4 && <StepResultados results={results} test={testConfig}/>}
+  function addProject(p){setProjects(prev=>[...prev,p]);setView({screen:'detail',project:p});}
+  function addTest(projectId,t){
+    setProjects(prev=>prev.map(p=>p.id===projectId?{...p,tests:[...p.tests,t]}:p));
+    const updatedProject=projects.find(p=>p.id===projectId);
+    setView({screen:'detail',project:{...updatedProject,tests:[...updatedProject.tests,t]}});
+  }
+
+  const currentProject=view.project?projects.find(p=>p.id===view.project.id)||view.project:null;
+
+  return(
+    <div style={{display:'flex',minHeight:'100vh',background:C.bg}}>
+      <Sidebar active={nav} onNav={id=>{setNav(id);setView({screen:'list'});}} apiKey={apiKey} onLogout={()=>setApiKey('')}/>
+      <div style={{flex:1,overflowY:'auto',minWidth:0}}>
+        {nav==='projects'&&(
+          <>
+            {view.screen==='list'&&<ProjectsList projects={projects} onSelect={p=>setView({screen:'detail',project:p})} onCreate={()=>setView({screen:'create'})}/>}
+            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} onBack={()=>setView({screen:'list'})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView({screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
+            {view.screen==='create'&&<CreateProject onSave={addProject} onCancel={()=>setView({screen:'list'})}/>}
+            {view.screen==='newtest'&&currentProject&&<CreateTest project={currentProject} apiKey={apiKey} onSave={t=>addTest(currentProject.id,t)} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
+            {view.screen==='report'&&currentProject&&<ReportView project={currentProject} test={view.test} results={view.test?.results} onBack={()=>setView({screen:'detail',project:currentProject})}/>}
+          </>
+        )}
+        {nav==='reports'&&(
+          <div className='fade' style={{padding:'28px 32px'}}>
+            <h1 style={{...T.h1,marginBottom:'6px'}}>Reportes</h1>
+            <p style={{...T.body,marginBottom:'24px'}}>Resumen de todos los tests completados.</p>
+            {projects.flatMap(p=>p.tests.filter(t=>t.status==='completado').map(t=>({...t,projectName:p.name}))).length===0
+              ? <Card style={{textAlign:'center',padding:'48px',color:C.txtDim}}><p>No hay tests completados todavía.</p></Card>
+              : projects.flatMap(p=>p.tests.filter(t=>t.status==='completado').map(t=>(
+                <Card key={t.id} style={{marginBottom:'10px',cursor:'pointer'}} onClick={()=>{setNav('projects');setView({screen:'report',project:p,test:t});}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div>
+                      <Tag color='blue'>{p.name}</Tag>
+                      <p style={{...T.h3,marginTop:'6px',marginBottom:'3px'}}>{t.name}</p>
+                      <p style={{...T.mono,fontSize:'11px'}}>{t.url}</p>
+                    </div>
+                    {t.ganador&&<div style={{textAlign:'right'}}>
+                      <div style={{fontSize:'20px',fontWeight:700,color:C.green}}>{t.uplift}</div>
+                      <div style={T.small}>Variante {t.ganador}</div>
+                    </div>}
+                  </div>
+                </Card>
+              )))}
+          </div>
+        )}
+        {nav==='settings'&&(
+          <div className='fade' style={{padding:'28px 32px',maxWidth:'500px'}}>
+            <h1 style={{...T.h1,marginBottom:'6px'}}>Ajustes</h1>
+            <p style={{...T.body,marginBottom:'24px'}}>Configuración de la cuenta.</p>
+            <Card>
+              <p style={{...T.label,marginBottom:'10px'}}>Conexión API</p>
+              <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'12px'}}>
+                <div style={{width:'8px',height:'8px',borderRadius:'50%',background:C.green}}/>
+                <span style={{fontSize:'13px',color:C.green,fontWeight:600}}>Conectada</span>
+              </div>
+              <p style={{...T.mono,marginBottom:'12px'}}>{apiKey.slice(0,20)}...</p>
+              <Btn variant='ghost' small onClick={()=>setApiKey('')}>Cambiar clave API</Btn>
+            </Card>
+            <Card style={{marginTop:'12px'}}>
+              <p style={{...T.label,marginBottom:'10px'}}>Proyecto piloto</p>
+              <p style={{...T.body,marginBottom:'10px'}}>El proyecto "Moda Urban" viene precargado con datos reales y un test completado para que puedas explorar la app.</p>
+              <Tag color='green'>1 test completado</Tag>
+            </Card>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
 </script>
 </body>
 </html>
