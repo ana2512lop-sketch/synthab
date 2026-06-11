@@ -295,7 +295,7 @@ function ProjectsList({projects,onSelect,onCreate}){
 }
 
 // ── PROJECT DETAIL ────────────────────────────────────────────────────────
-function ProjectDetail({project,onBack,onNewTest,onViewTest,onViewReport}){
+function ProjectDetail({project,onBack,onEdit,onNewTest,onViewTest,onViewReport}){
   const statusColor={completado:'green',enCurso:'amber','en curso':'amber',borrador:'default'};
   return(
     <div className="fade" style={{padding:'28px 32px'}}>
@@ -310,6 +310,7 @@ function ProjectDetail({project,onBack,onNewTest,onViewTest,onViewReport}){
           <p style={{...T.mono,marginTop:'3px'}}>{project.domain}</p>
         </div>
         <div style={{display:'flex',gap:'10px'}}>
+          <Btn variant='ghost' onClick={onEdit}>Editar datos base</Btn>
           <Btn variant='ghost' onClick={onViewReport}>Ver reporte</Btn>
           <Btn onClick={onNewTest}>+ Crear test</Btn>
         </div>
@@ -392,31 +393,69 @@ function ProjectDetail({project,onBack,onNewTest,onViewTest,onViewReport}){
 const SECTORES=[{value:'moda',label:'Moda'},{value:'hogar',label:'Hogar'},{value:'electronica',label:'Electrónica'},{value:'belleza',label:'Belleza'},{value:'alimentacion',label:'Alimentación'},{value:'deporte',label:'Deporte'},{value:'turismo',label:'Turismo'},{value:'servicios',label:'Servicios / SaaS'}];
 const CANALES_LIST=['Orgánico / SEO','Google Ads','Meta Ads','Email / Newsletter','Directo','Social orgánico','TikTok Ads','Afiliados'];
 
-function CreateProject({onSave,onCancel}){
-  const SUB=['Proyecto','KPIs','Exp 1','Exp 2','Exp 3'];
+function CreateProject({onSave, onCancel, initial}){
+  const STEPS=[
+    {num:'01',label:'KPIs'},
+    {num:'02',label:'Comportamiento'},
+    {num:'03',label:'Adquisición'},
+    {num:'04',label:'Funnel'},
+    {num:'05',label:'Negocio'},
+    {num:'06',label:'CRM / MarTech'},
+  ];
   const [sub,setSub]=useState(0);
-  const [name,setName]=useState('');
-  const [domain,setDomain]=useState('');
-  const [sector,setSector]=useState('moda');
-  const [cvr,setCvr]=useState('');
-  const [ticket,setTicket]=useState('');
-  const [transacciones,setTransacciones]=useState('');
-  const [trafico,setTrafico]=useState('');
-  const [mobile,setMobile]=useState(60);
-  const [tipoCompra,setTipoCompra]=useState('mixta');
-  const [recurrentes,setRecurrentes]=useState(30);
-  const [canales,setCanales]=useState([{canal:'',pct:''},{canal:'',pct:''},{canal:'',pct:''}]);
+
+  // Step 0 — KPIs
+  const [name,setName]=useState(initial?.name||'');
+  const [domain,setDomain]=useState(initial?.domain||'');
+  const [sector,setSector]=useState(initial?.sector||'moda');
+  const [periodo,setPeriodo]=useState(initial?.periodo||'');
+  const [sesiones,setSesiones]=useState(initial?.kpis?.trafico||'');
+  const [transacciones,setTransacciones]=useState(initial?.kpis?.transacciones||'');
+  const [ingresos,setIngresos]=useState(initial?.kpis?.ingresos||'');
+  const [cvr,setCvr]=useState(initial?.kpis?.cvr||'');
+  const [rebote,setRebote]=useState(initial?.kpis?.rebote||'');
+  const [ticket,setTicket]=useState(initial?.kpis?.ticket||'');
+  const [desktop,setDesktop]=useState(initial?.kpis?.desktop||42);
+  const [mobile,setMobile]=useState(initial?.kpis?.mobile||51);
+  const [tablet,setTablet]=useState(initial?.kpis?.tablet||7);
+
+  // Step 1 — Comportamiento
   const [exp1,setExp1]=useState(null);
   const [exp2,setExp2]=useState(null);
   const [exp3,setExp3]=useState(null);
   const ref1=useRef(),ref2=useRef(),ref3=useRef();
 
+  // Step 2 — Adquisición
+  const [canales,setCanales]=useState(initial?.canales||[{canal:'',pct:''},{canal:'',pct:''},{canal:'',pct:''}]);
+  const [nuevos,setNuevos]=useState(initial?.kpis?.nuevos||60);
+  const [canalConversion,setCanalConversion]=useState(initial?.canalConversion||'');
+
+  // Step 3 — Funnel
+  const [tipoCompra,setTipoCompra]=useState(initial?.kpis?.tipoCompra||'mixta');
+  const [ticketMedio,setTicketMedio]=useState(initial?.kpis?.ticket||'');
+  const [abandonoPrincipal,setAbandonoPrincipal]=useState(initial?.abandonoPrincipal||'');
+  const [pasosFunnel,setPasosFunnel]=useState(initial?.pasosFunnel||'');
+
+  // Step 4 — Negocio
+  const [descripcion,setDescripcion]=useState(initial?.descripcion||'');
+  const [clientesActivos,setClientesActivos]=useState(initial?.clientesActivos||'');
+  const [ltvMedio,setLtvMedio]=useState(initial?.ltvMedio||'');
+  const [frecuenciaCompra,setFrecuenciaCompra]=useState(initial?.frecuenciaCompra||'');
+
+  // Step 5 — CRM
+  const [crmSeleccionado,setCrmSeleccionado]=useState(initial?.crm?.tipo||null);
+  const [crmCsv,setCrmCsv]=useState(null);
+  const refCrm=useRef();
+
   function score(){
-    let s=40;
-    if(cvr&&ticket&&trafico) s+=5;
-    if(exp1) s+=25;
-    if(exp2) s+=15;
-    if(exp3) s+=15;
+    let s=30;
+    if(cvr&&sesiones&&ticket) s+=10;
+    if(rebote) s+=5;
+    if(exp1) s+=20;
+    if(exp2) s+=10;
+    if(exp3) s+=10;
+    if(canales.some(c=>c.canal)) s+=5;
+    if(crmSeleccionado||crmCsv) s+=10;
     return Math.min(s,100);
   }
 
@@ -427,212 +466,345 @@ function CreateProject({onSave,onCancel}){
     r.readAsText(f,'UTF-8');
   }
 
-  function CSVBox({parsed,refEl,setter,label,hint,tutorial}){
+  function CSVBox({parsed,refEl,setter,label,hint,tutorial,required}){
     const [showTip,setShowTip]=useState(false);
     return(
       <div style={{marginBottom:'14px'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}}>
-          <label style={T.label}>{label}</label>
+          <label style={T.label}>{label}{required&&<span style={{color:C.red}}> *</span>}</label>
           <button onClick={()=>setShowTip(!showTip)} style={{fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer'}}>
             {showTip?'Ocultar tutorial':'¿Cómo exportarlo de GA4?'}
           </button>
         </div>
-        {showTip&&(
-          <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px',marginBottom:'10px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>
-            {tutorial}
-          </div>
-        )}
+        {showTip&&<div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px',marginBottom:'10px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>{tutorial}</div>}
         <div onClick={()=>refEl.current.click()}
-          style={{border:`1.5px dashed ${parsed?C.green:C.border}`,borderRadius:'10px',padding:'18px',textAlign:'center',cursor:'pointer',background:parsed?C.greenDim:'#070713'}}>
+          style={{border:`1.5px dashed ${parsed?C.green:C.border}`,borderRadius:'10px',padding:'16px',textAlign:'center',cursor:'pointer',background:parsed?C.greenDim:'#070713'}}>
           <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter)}/>
-          <div style={{fontSize:'20px',marginBottom:'6px'}}>📊</div>
-          {parsed
-            ?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{parsed.fileName} · {parsed.rows.length} filas</p>
-            :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV o haz clic para subir</p>
-          }
-          <p style={{...T.small,marginTop:'4px'}}>{hint}</p>
+          <div style={{fontSize:'18px',marginBottom:'5px'}}>📊</div>
+          {parsed?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{parsed.fileName} · {parsed.rows.length} filas</p>
+            :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV o haz clic</p>}
+          <p style={{...T.small,marginTop:'3px'}}>{hint}</p>
         </div>
-        {parsed&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>
-          ✓ Columnas: {parsed.headers.join(', ')}
-        </div>}
+        {parsed&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>✓ Columnas: {parsed.headers.join(', ')}</div>}
       </div>
     );
   }
 
   function handleSave(){
-    const q=score();
     onSave({
-      id:'p'+Date.now(),name,domain,sector,createdAt:new Date().toISOString().slice(0,10),quality:q,
-      kpis:{cvr,ticket,transacciones,trafico,mobile,tipoCompra,recurrentes},
+      id:initial?.id||('p'+Date.now()),
+      name,domain,sector,periodo,
+      createdAt:initial?.createdAt||new Date().toISOString().slice(0,10),
+      quality:score(),
+      kpis:{cvr,ticket,transacciones,trafico:sesiones,ingresos,rebote,desktop,mobile,tablet,tipoCompra,recurrentes:100-nuevos,nuevos},
       canales:canales.filter(c=>c.canal),
-      exp1:!!exp1,exp2:!!exp2,exp3:!!exp3,tests:[]
+      canalConversion,
+      abandonoPrincipal,pasosFunnel,
+      descripcion,clientesActivos,ltvMedio,frecuenciaCompra,
+      crm:{tipo:crmSeleccionado,csv:crmCsv?crmCsv.fileName:null},
+      exp1:!!exp1,exp2:!!exp2,exp3:!!exp3,
+      tests:initial?.tests||[]
     });
   }
 
-  const canNext0=name&&domain;
-  const canNext1=cvr&&ticket&&transacciones&&trafico;
-
-  return(
-    <div className="fade" style={{padding:'28px 32px',maxWidth:'620px'}}>
-      <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'20px'}}>
-        <button onClick={onCancel} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px'}}>← Proyectos</button>
-        <span style={{color:C.txtDim}}>/</span>
-        <span style={{fontSize:'13px',color:C.txt}}>Nuevo proyecto</span>
-      </div>
-      <h1 style={{...T.h1,marginBottom:'6px'}}>Crear proyecto</h1>
-      <p style={{...T.body,marginBottom:'20px'}}>Configura la base de datos del cliente. Cuanto más completa, más precisos serán los perfiles sintéticos.</p>
-      <QualityBar score={score()}/>
-
-      {/* sub-step bar */}
-      <div style={{display:'flex',gap:'4px',marginBottom:'24px',overflowX:'auto'}}>
-        {SUB.map((st,i)=>(
-          <div key={st} style={{flex:1,textAlign:'center',padding:'8px 4px',borderRadius:'6px',background:i===sub?C.accentDim:'transparent',border:`1px solid ${i===sub?C.accent:C.border}`,cursor:i<sub?'pointer':'default',fontSize:'11px',fontWeight:600,color:i<sub?C.green:i===sub?C.accent:C.txtDim,whiteSpace:'nowrap'}}
-            onClick={()=>i<sub&&setSub(i)}>
-            {i<sub?'✓ ':''}{st}
+  // Step tab bar
+  function StepTabs(){
+    return(
+      <div style={{display:'flex',borderBottom:`1px solid ${C.border}`,marginBottom:'22px',overflowX:'auto'}}>
+        {STEPS.map((st,i)=>(
+          <div key={st.num} onClick={()=>i<sub&&setSub(i)}
+            style={{padding:'10px 14px',fontSize:'12px',fontWeight:600,cursor:i<sub?'pointer':'default',whiteSpace:'nowrap',
+              color:i<sub?C.green:i===sub?C.white:C.txtDim,
+              borderBottom:`2px solid ${i===sub?C.accent:'transparent'}`,
+              background:'transparent'}}>
+            {i<sub?'✓ ':''}{st.num} {st.label}
           </div>
         ))}
       </div>
+    );
+  }
 
+  const isEdit = !!initial;
+
+  return(
+    <div className='fade' style={{padding:'28px 32px',maxWidth:'680px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'16px'}}>
+        <button onClick={onCancel} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px'}}>← Proyectos</button>
+        <span style={{color:C.txtDim}}>/</span>
+        <span style={{fontSize:'13px',color:C.txt}}>{isEdit?'Editar proyecto':'Nuevo proyecto'}</span>
+      </div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'16px'}}>
+        <div>
+          <h1 style={{...T.h1,marginBottom:'4px'}}>{isEdit?`Editar — ${initial.name}`:'Crear proyecto'}</h1>
+          <p style={T.body}>Base de datos del cliente. Cuanto más completa, más precisos los perfiles sintéticos.</p>
+        </div>
+      </div>
+      <QualityBar score={score()}/>
+      <StepTabs/>
+
+      {/* STEP 0 — KPIs */}
       {sub===0&&(
-        <Card>
-          <p style={{...T.h3,marginBottom:'14px'}}>Datos del proyecto</p>
-          <Input label='Nombre del proyecto' value={name} onChange={setName} placeholder='Ej: Moda Urban — CRO 2026' required/>
-          <Input label='Dominio' value={domain} onChange={setDomain} placeholder='modaurban.es' required hint='Sin https://'/>
-          <Select label='Sector' value={sector} onChange={setSector} options={SECTORES}/>
-          <div style={s.btnRow||{display:'flex',justifyContent:'flex-end',marginTop:'8px'}}>
-            <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
-            <Btn disabled={!canNext0} onClick={()=>setSub(1)}>Siguiente →</Btn>
-          </div>
-        </Card>
-      )}
-
-      {sub===1&&(
         <div>
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'14px'}}>KPIs del negocio <span style={{color:C.red}}>*</span></p>
-            <p style={{...T.small,marginBottom:'14px'}}>Datos que el cliente conoce sin necesitar GA4.</p>
+            <p style={{...T.h3,marginBottom:'14px'}}>Identificación</p>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
-              <Input label='CVR actual (%)' value={cvr} onChange={setCvr} type='number' placeholder='2.4' required/>
-              <Input label='Ticket medio (€)' value={ticket} onChange={setTicket} type='number' placeholder='68' required/>
-              <Input label='Transacciones / mes' value={transacciones} onChange={setTransacciones} type='number' placeholder='320' required/>
-              <Input label='Sesiones / mes' value={trafico} onChange={setTrafico} type='number' placeholder='45000' required/>
-            </div>
-            <div style={{marginBottom:'14px'}}>
-              <label style={{...T.label,display:'block',marginBottom:'6px'}}>% Mobile: {mobile}% · Desktop: {100-mobile-2}% · Tablet: 2%</label>
-              <input type='range' min='10' max='88' step='1' value={mobile} onChange={e=>setMobile(Number(e.target.value))} style={{width:'100%',accentColor:C.accent}}/>
+              <Input label='Nombre del cliente / proyecto' value={name} onChange={setName} placeholder='Ej: MiTienda.com — proyecto ecommerce moda' required/>
+              <Input label='URL de la web' value={domain} onChange={setDomain} placeholder='https://www.cliente.com' required/>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
-              <Select label='Tipo de compra' value={tipoCompra} onChange={setTipoCompra} options={[{value:'impulsiva',label:'Impulsiva'},{value:'reflexiva',label:'Reflexiva'},{value:'mixta',label:'Mixta'}]}/>
+              <Select label='Sector' value={sector} onChange={setSector} options={SECTORES}/>
+              <Input label='Período de los datos' value={periodo} onChange={setPeriodo} placeholder='Ej: Últimos 90 días / Ene-Mar 2025'/>
+            </div>
+          </Card>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'4px'}}>KPIs principales</p>
+            <p style={{...T.small,marginBottom:'14px'}}>Introduce los valores del período seleccionado</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px',marginBottom:'12px'}}>
+              <Input label='Sesiones totales' value={sesiones} onChange={setSesiones} placeholder='Ej: 450.000' required/>
+              <Input label='Transacciones' value={transacciones} onChange={setTransacciones} placeholder='Ej: 8.200'/>
+              <Input label='Ingresos' value={ingresos} onChange={setIngresos} placeholder='Ej: 1.240.000€'/>
+              <Input label='Tasa de conversión (%)' value={cvr} onChange={setCvr} placeholder='Ej: 1.82%' required/>
+              <Input label='Tasa de rebote (%)' value={rebote} onChange={setRebote} placeholder='Ej: 54%'/>
+              <Input label='Ticket medio' value={ticket} onChange={setTicket} placeholder='Ej: 151€' required/>
+            </div>
+            <p style={{...T.label,marginBottom:'8px'}}>Sesiones por dispositivo</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px'}}>
               <div>
-                <label style={{...T.label,display:'block',marginBottom:'6px'}}>% Recurrentes: {recurrentes}%</label>
-                <input type='range' min='0' max='100' step='5' value={recurrentes} onChange={e=>setRecurrentes(Number(e.target.value))} style={{width:'100%',accentColor:C.accent,marginTop:'6px'}}/>
+                <label style={{...T.small,display:'block',marginBottom:'4px'}}>Desktop %</label>
+                <input type='number' value={desktop} onChange={e=>setDesktop(Number(e.target.value))} style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
+              </div>
+              <div>
+                <label style={{...T.small,display:'block',marginBottom:'4px'}}>Mobile %</label>
+                <input type='number' value={mobile} onChange={e=>setMobile(Number(e.target.value))} style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
+              </div>
+              <div>
+                <label style={{...T.small,display:'block',marginBottom:'4px'}}>Tablet %</label>
+                <input type='number' value={tablet} onChange={e=>setTablet(Number(e.target.value))} style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
               </div>
             </div>
           </Card>
-          <Card>
-            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'14px'}}>
-              <p style={T.h3}>Canales principales (hasta 4)</p>
-              {canales.length<4&&<button style={{fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer'}} onClick={()=>setCanales([...canales,{canal:'',pct:''}])}>+ Añadir</button>}
-            </div>
-            {canales.map((c,i)=>(
-              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 80px',gap:'8px',marginBottom:'8px'}}>
-                <select value={c.canal} onChange={e=>{const n=[...canales];n[i]={...n[i],canal:e.target.value};setCanales(n);}}
-                  style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
-                  <option value=''>Canal...</option>
-                  {CANALES_LIST.map(ch=><option key={ch}>{ch}</option>)}
-                </select>
-                <input type='number' placeholder='%' value={c.pct} onChange={e=>{const n=[...canales];n[i]={...n[i],pct:e.target.value};setCanales(n);}}
-                  style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 10px',color:C.txt,fontSize:'13px',outline:'none',textAlign:'center'}}/>
-              </div>
-            ))}
-          </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
-            <Btn variant='ghost' onClick={()=>setSub(0)}>Atrás</Btn>
-            <Btn disabled={!canNext1} onClick={()=>setSub(2)}>Siguiente →</Btn>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+            <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
+            <Btn disabled={!name||!domain||!cvr||!sesiones||!ticket} onClick={()=>setSub(1)}>Siguiente →</Btn>
           </div>
         </div>
       )}
 
-      {sub===2&&(
+      {/* STEP 1 — Comportamiento GA4 */}
+      {sub===1&&(
         <div>
-          <Card style={{marginBottom:'12px',borderColor:C.accent}}>
+          <Card style={{marginBottom:'12px',border:`1px solid ${C.accent}`}}>
             <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
               <Tag color='purple'>Obligatorio</Tag>
               <p style={T.h3}>Exp 1 — Quién es el usuario</p>
             </div>
-            <p style={{...T.body,marginBottom:'14px'}}>Define los arquetipos base: quién te visita cruzado con conversión. Sin esto no se pueden generar perfiles fiables.</p>
-            <CSVBox parsed={exp1} refEl={ref1} setter={setExp1}
+            <p style={{...T.body,marginBottom:'14px'}}>Define los arquetipos base. Sin esto no se pueden generar perfiles fiables.</p>
+            <CSVBox parsed={exp1} refEl={ref1} setter={setExp1} required
               label='CSV de la Exploración 1'
-              hint='Dimensiones: País, Ciudad, Edad, Género, Tipo usuario, Dispositivo · Métricas: Usuarios activos, Sesiones, Conversiones, Tasa de conversión'
-              tutorial={<span>
-                1. GA4 → <b>Explorar</b> → <b>Exploración en blanco</b> (Tabla libre)<br/>
-                2. <b>Dimensiones (filas):</b> País · Ciudad · Edad · Género · Intereses · Idioma<br/>
-                3. <b>Dimensiones (columnas):</b> Tipo de usuario · Dispositivo · Sistema operativo<br/>
-                4. <b>Métricas:</b> Usuarios activos · Sesiones · Tasa de engagement · Sesiones por usuario · Conversiones · Tasa de conversión<br/>
-                5. Rango de fechas: <b>últimos 90 días</b><br/>
-                6. Arriba derecha → <b>Exportar → Descargar CSV</b>
-              </span>}
+              hint='Dimensiones: País, Ciudad, Edad, Género, Tipo usuario, Dispositivo · Métricas: Sesiones, Conversiones, CVR'
+              tutorial={<span>1. GA4 → <b>Explorar → Exploración en blanco</b><br/>2. Dimensiones (filas): País · Ciudad · Edad · Género · Idioma<br/>3. Dimensiones (columnas): Tipo usuario · Dispositivo<br/>4. Métricas: Usuarios activos · Sesiones · Conversiones · CVR<br/>5. Últimos 90 días → Exportar CSV</span>}
             />
           </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
-            <Btn variant='ghost' onClick={()=>setSub(1)}>Atrás</Btn>
-            <Btn disabled={!exp1} onClick={()=>setSub(3)}>Siguiente →</Btn>
+          <Card style={{marginBottom:'12px'}}>
+            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
+              <Tag color='amber'>Opcional +10%</Tag>
+              <p style={T.h3}>Exp 2 — Cómo llega y de dónde viene</p>
+            </div>
+            <p style={{...T.body,marginBottom:'14px'}}>Contexto mental de entrada por canal, fuente y campaña.</p>
+            <CSVBox parsed={exp2} refEl={ref2} setter={setExp2}
+              label='CSV de la Exploración 2'
+              hint='Dimensiones: Canal, Fuente/Medio, Campaña, Página destino · Métricas: Sesiones, CVR, Duración'
+              tutorial={<span>1. GA4 → <b>Explorar → Exploración en blanco</b><br/>2. Dimensiones (filas): Canal de sesión · Fuente/Medio · Campaña<br/>3. Dimensiones (columnas): Tipo usuario · Dispositivo<br/>4. Métricas: Sesiones · CVR · Duración media · Conversiones<br/>5. Últimos 90 días → Exportar CSV</span>}
+            />
+          </Card>
+          <Card style={{marginBottom:'12px'}}>
+            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
+              <Tag color='amber'>Opcional +10%</Tag>
+              <p style={T.h3}>Exp 3 — Cómo navega y qué hace dentro</p>
+            </div>
+            <p style={{...T.body,marginBottom:'14px'}}>Rutas reales por segmento. Diferencias entre conversor y no conversor.</p>
+            <CSVBox parsed={exp3} refEl={ref3} setter={setExp3}
+              label='CSV de la Exploración 3'
+              hint='Exploración de rutas filtrada por segmento (canal, dispositivo, conversores)'
+              tutorial={<span>1. GA4 → <b>Explorar → Exploración de rutas</b><br/>2. Nodo inicio: Página de destino<br/>3. Dimensiones: Título página · Nombre evento · Búsqueda interna<br/>4. Aplica segmentos: Por canal · Por dispositivo · Por conversores<br/>5. Exportar CSV</span>}
+            />
+          </Card>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+            <Btn variant='ghost' onClick={()=>setSub(0)}>Atrás</Btn>
+            <Btn disabled={!exp1} onClick={()=>setSub(2)}>Siguiente →</Btn>
           </div>
         </div>
       )}
 
+      {/* STEP 2 — Adquisición */}
+      {sub===2&&(
+        <div>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>Canales de adquisición</p>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
+              <p style={T.body}>Hasta 4 canales principales con su % de tráfico</p>
+              {canales.length<4&&<button style={{fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer'}} onClick={()=>setCanales([...canales,{canal:'',pct:''}])}>+ Añadir</button>}
+            </div>
+            {canales.map((c,i)=>(
+              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 80px 32px',gap:'8px',marginBottom:'8px',alignItems:'center'}}>
+                <select value={c.canal} onChange={e=>{const n=[...canales];n[i]={...n[i],canal:e.target.value};setCanales(n);}}
+                  style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:c.canal?C.txt:C.txtDim,fontSize:'13px',outline:'none'}}>
+                  <option value=''>Seleccionar canal...</option>
+                  {CANALES_LIST.map(ch=><option key={ch}>{ch}</option>)}
+                </select>
+                <input type='number' placeholder='%' value={c.pct} onChange={e=>{const n=[...canales];n[i]={...n[i],pct:e.target.value};setCanales(n);}}
+                  style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 10px',color:C.txt,fontSize:'13px',outline:'none',textAlign:'center'}}/>
+                <button onClick={()=>setCanales(canales.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:C.txtDim,cursor:'pointer',fontSize:'14px'}}>✕</button>
+              </div>
+            ))}
+          </Card>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>Usuarios nuevos vs recurrentes</p>
+            <label style={{...T.label,display:'block',marginBottom:'6px'}}>% Usuarios nuevos: <span style={{color:C.accent,fontWeight:700}}>{nuevos}%</span> · Recurrentes: {100-nuevos}%</label>
+            <input type='range' min='0' max='100' step='5' value={nuevos} onChange={e=>setNuevos(Number(e.target.value))} style={{width:'100%',accentColor:C.accent}}/>
+          </Card>
+          <Card style={{marginBottom:'12px'}}>
+            <label style={{...T.label,display:'block',marginBottom:'6px'}}>Canal con mayor tasa de conversión</label>
+            <select value={canalConversion} onChange={e=>setCanalConversion(e.target.value)}
+              style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
+              <option value=''>No lo sé</option>
+              {CANALES_LIST.map(ch=><option key={ch}>{ch}</option>)}
+            </select>
+          </Card>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+            <Btn variant='ghost' onClick={()=>setSub(1)}>Atrás</Btn>
+            <Btn onClick={()=>setSub(3)}>Siguiente →</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3 — Funnel */}
       {sub===3&&(
         <div>
-          <Card style={{marginBottom:'12px',borderColor:C.border}}>
-            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
-              <Tag color='amber'>Opcional +15%</Tag>
-              <p style={T.h3}>Exp 2 — Cómo llega y de dónde viene</p>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>Tipo de compra</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px'}}>
+              {[{v:'impulsiva',label:'Impulsiva',desc:'Decisión rápida, emocional',icon:'⚡'},{v:'reflexiva',label:'Reflexiva',desc:'Investigan antes de comprar',icon:'🔍'},{v:'mixta',label:'Mixta',desc:'Depende del producto',icon:'⚖️'}].map(op=>(
+                <div key={op.v} onClick={()=>setTipoCompra(op.v)}
+                  style={{padding:'12px',borderRadius:'8px',border:`1px solid ${tipoCompra===op.v?C.accent:C.border}`,background:tipoCompra===op.v?C.accentDim:'transparent',cursor:'pointer',textAlign:'center'}}>
+                  <div style={{fontSize:'20px',marginBottom:'5px'}}>{op.icon}</div>
+                  <div style={{fontSize:'12px',fontWeight:600,color:tipoCompra===op.v?C.accent:C.txt,marginBottom:'2px'}}>{op.label}</div>
+                  <div style={{fontSize:'10px',color:C.txtDim}}>{op.desc}</div>
+                </div>
+              ))}
             </div>
-            <p style={{...T.body,marginBottom:'14px'}}>Contexto mental de entrada. Un usuario de paid tiene intención muy distinta a uno de orgánico o newsletter.</p>
-            <CSVBox parsed={exp2} refEl={ref2} setter={setExp2}
-              label='CSV de la Exploración 2'
-              hint='Dimensiones: Canal, Fuente/Medio, Campaña, Página destino · Métricas: Sesiones, Usuarios, Tasa engagement, Duración sesión, Conversiones, CVR'
-              tutorial={<span>
-                1. GA4 → <b>Explorar</b> → <b>Exploración en blanco</b> (Tabla libre)<br/>
-                2. <b>Dimensiones (filas):</b> Canal de sesión · Fuente/Medio · Campaña · Página de destino<br/>
-                3. <b>Dimensiones (columnas):</b> Tipo de usuario · Dispositivo<br/>
-                4. <b>Métricas:</b> Sesiones · Usuarios activos · Tasa de engagement · Duración media sesión · Conversiones · Tasa de conversión de sesión<br/>
-                5. Rango de fechas: <b>últimos 90 días</b><br/>
-                6. Exportar → <b>Descargar CSV</b>
-              </span>}
-            />
           </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>Pasos del funnel</p>
+            <div style={{marginBottom:'12px'}}>
+              <label style={{...T.label,display:'block',marginBottom:'5px'}}>Principal punto de abandono</label>
+              <select value={abandonoPrincipal} onChange={e=>setAbandonoPrincipal(e.target.value)}
+                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
+                <option value=''>No lo sé</option>
+                <optgroup label='— Top of funnel'><option>Homepage — no encuentra lo que busca</option><option>Categoría — no filtra bien</option></optgroup>
+                <optgroup label='— Middle funnel'><option>Ficha de producto — falta información</option><option>Ficha de producto — precio o confianza</option></optgroup>
+                <optgroup label='— Bottom funnel'><option>Carrito — ve el total y sale</option><option>Checkout — proceso largo</option><option>Pago — sin método preferido</option></optgroup>
+              </select>
+            </div>
+            <Input label='Describe los pasos del funnel (opcional)' value={pasosFunnel} onChange={setPasosFunnel} placeholder='Ej: Homepage → Categoría → Ficha → Carrito → Checkout → Confirmación'/>
+          </Card>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(2)}>Atrás</Btn>
             <Btn onClick={()=>setSub(4)}>Siguiente →</Btn>
           </div>
         </div>
       )}
 
+      {/* STEP 4 — Negocio */}
       {sub===4&&(
         <div>
-          <Card style={{marginBottom:'12px',borderColor:C.border}}>
-            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
-              <Tag color='amber'>Opcional +15%</Tag>
-              <p style={T.h3}>Exp 3 — Cómo navega y qué hace dentro</p>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'14px'}}>Datos de negocio</p>
+            <div style={{marginBottom:'12px'}}>
+              <label style={{...T.label,display:'block',marginBottom:'5px'}}>Descripción del negocio</label>
+              <textarea value={descripcion} onChange={e=>setDescripcion(e.target.value)} placeholder='Ej: Ecommerce de moda urbana dirigido a 25-40 años, ticket medio 68€, con fuerte presencia en Instagram...'
+                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',resize:'vertical',minHeight:'70px'}}/>
             </div>
-            <p style={{...T.body,marginBottom:'14px'}}>Rutas reales por segmento. Las diferencias entre conversor y no conversor definen el comportamiento del sintético.</p>
-            <CSVBox parsed={exp3} refEl={ref3} setter={setExp3}
-              label='CSV de la Exploración 3'
-              hint='Exploración de rutas: Nodo inicio = Página destino · Dimensiones: Título página, Nombre evento, Búsqueda interna · Segmentos: por canal, dispositivo, tipo usuario, conversores'
-              tutorial={<span>
-                1. GA4 → <b>Explorar</b> → <b>Exploración de rutas</b> (Path exploration)<br/>
-                2. <b>Nodo de inicio:</b> Página de destino (primera URL visitada)<br/>
-                3. <b>Dimensiones de nodo:</b> Título de página · Nombre del evento · Búsqueda en site<br/>
-                4. <b>Aplica segmentos:</b> Por canal · Por dispositivo · Por tipo usuario · Por conversores<br/>
-                5. Ejecuta la misma exploración con distintos segmentos para comparar rutas<br/>
-                6. Exportar → <b>Descargar CSV</b>
-              </span>}
-            />
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px'}}>
+              <Input label='Clientes activos' value={clientesActivos} onChange={setClientesActivos} placeholder='Ej: 12.000'/>
+              <Input label='LTV medio (€)' value={ltvMedio} onChange={setLtvMedio} placeholder='Ej: 240€'/>
+              <div>
+                <label style={{...T.label,display:'block',marginBottom:'5px'}}>Frecuencia de compra</label>
+                <select value={frecuenciaCompra} onChange={e=>setFrecuenciaCompra(e.target.value)}
+                  style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
+                  <option value=''>No sé</option>
+                  <option>Una vez al año</option>
+                  <option>2-3 veces al año</option>
+                  <option>Mensual</option>
+                  <option>Semanal o más</option>
+                </select>
+              </div>
+            </div>
           </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(3)}>Atrás</Btn>
-            <Btn variant='green' onClick={handleSave}>Crear proyecto ({score()}% precisión)</Btn>
+            <Btn onClick={()=>setSub(5)}>Siguiente →</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 5 — CRM / MarTech */}
+      {sub===5&&(
+        <div>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'4px'}}>Capa CRM / MarTech</p>
+            <p style={{...T.body,marginBottom:'16px'}}>Conecta las fuentes de datos del cliente para enriquecer los perfiles con comportamiento real de BBDD. Elige el conector o importa un CSV.</p>
+            <p style={{...T.label,marginBottom:'10px'}}>Selecciona tu plataforma</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px',marginBottom:'14px'}}>
+              {[
+                {id:'salesforce',label:'Salesforce',desc:'Sales Cloud, Marketing Cloud, Commerce Cloud',icon:'☁️',tag:'API'},
+                {id:'sap',label:'SAP',desc:'SAP Commerce, Customer Experience, Analytics',icon:'🔷',tag:'API'},
+                {id:'adobe',label:'Adobe Experience',desc:'Marketo, Analytics, Target, Commerce',icon:'🔴',tag:'API'},
+                {id:'csv',label:'Importar BBDD',desc:'CSV o Excel exportado de cualquier herramienta',icon:'📊',tag:'CSV/XLS'},
+                {id:'otro',label:'Otro conector',desc:'HubSpot, Klaviyo, Mailchimp, SAP, custom endpoint',icon:'🔌',tag:'API'},
+              ].map(crm=>(
+                <div key={crm.id} onClick={()=>setCrmSeleccionado(crmSeleccionado===crm.id?null:crm.id)}
+                  style={{padding:'14px',borderRadius:'10px',border:`1px solid ${crmSeleccionado===crm.id?C.accent:C.border}`,background:crmSeleccionado===crm.id?C.accentDim:'#070713',cursor:'pointer',position:'relative'}}>
+                  <div style={{position:'absolute',top:'8px',right:'8px',fontSize:'9px',fontWeight:700,padding:'1px 6px',borderRadius:'10px',background:crm.tag==='API'?C.accentDim:C.greenDim,color:crm.tag==='API'?C.accent:C.green}}>{crm.tag}</div>
+                  <div style={{fontSize:'22px',marginBottom:'6px'}}>{crm.icon}</div>
+                  <p style={{fontSize:'13px',fontWeight:600,color:crmSeleccionado===crm.id?C.accent:C.txt,marginBottom:'3px'}}>{crm.label}</p>
+                  <p style={{fontSize:'10px',color:C.txtDim,lineHeight:'1.5'}}>{crm.desc}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Si eligen CSV */}
+            {crmSeleccionado==='csv'&&(
+              <div>
+                <p style={{...T.label,marginBottom:'8px'}}>Subir CSV / Excel de BBDD</p>
+                <div onClick={()=>refCrm.current.click()}
+                  style={{border:`1.5px dashed ${crmCsv?C.green:C.border}`,borderRadius:'10px',padding:'18px',textAlign:'center',cursor:'pointer',background:crmCsv?C.greenDim:'#070713'}}>
+                  <input ref={refCrm} type='file' accept='.csv,.xlsx,.xls,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setCrmCsv)}/>
+                  <div style={{fontSize:'20px',marginBottom:'6px'}}>📁</div>
+                  {crmCsv?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{crmCsv.fileName} · {crmCsv.rows?.length||0} filas</p>
+                    :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV/Excel o haz clic</p>}
+                  <p style={{...T.small,marginTop:'4px'}}>Columnas recomendadas: cliente_id, ticket_medio, frecuencia_compra, segmento, ltv, fecha_ultima_compra</p>
+                </div>
+                {crmCsv&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>✓ Columnas detectadas: {crmCsv.headers?.join(', ')}</div>}
+              </div>
+            )}
+
+            {/* Si eligen API */}
+            {crmSeleccionado&&crmSeleccionado!=='csv'&&(
+              <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
+                <p style={{color:C.amber,fontWeight:600,marginBottom:'4px'}}>🔌 Integración por API — próximamente</p>
+                <p>La conexión directa con {crmSeleccionado==='salesforce'?'Salesforce':crmSeleccionado==='sap'?'SAP':crmSeleccionado==='adobe'?'Adobe Experience':'tu plataforma'} estará disponible en la versión siguiente. Por ahora puedes exportar tus datos como CSV y subirlos con la opción "Importar BBDD".</p>
+                <button onClick={()=>setCrmSeleccionado('csv')} style={{marginTop:'8px',fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>Usar importación CSV mientras tanto →</button>
+              </div>
+            )}
+
+            {!crmSeleccionado&&(
+              <p style={{...T.small,textAlign:'center',padding:'8px'}}>Sin CRM los perfiles se generarán solo con datos GA4. Puedes añadirlo después desde la edición del proyecto.</p>
+            )}
+          </Card>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+            <Btn variant='ghost' onClick={()=>setSub(4)}>Atrás</Btn>
+            <Btn variant='green' onClick={handleSave}>{isEdit?'Guardar cambios':'Crear proyecto'} ({score()}% precisión)</Btn>
           </div>
         </div>
       )}
@@ -1974,8 +2146,9 @@ function App(){
         {nav==='projects'&&(
           <>
             {view.screen==='list'&&<ProjectsList projects={projects} onSelect={p=>setView({screen:'detail',project:p})} onCreate={()=>setView({screen:'create'})}/>}
-            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} onBack={()=>setView({screen:'list'})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView({screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
+            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView({screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
             {view.screen==='create'&&<CreateProject onSave={addProject} onCancel={()=>setView({screen:'list'})}/>}
+            {view.screen==='edit'&&currentProject&&<CreateProject initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));setView({screen:'detail',project:p});}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='newtest'&&currentProject&&<CreateTest project={currentProject} apiKey={apiKey} onSave={t=>addTest(currentProject.id,t)} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='report'&&currentProject&&<ReportView project={currentProject} test={view.test} results={view.test?.results} onBack={()=>setView({screen:'detail',project:currentProject})}/>}
           </>
