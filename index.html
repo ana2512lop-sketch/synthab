@@ -400,7 +400,6 @@ function CreateProject({onSave, onCancel, initial}){
     {num:'03',label:'Adquisición'},
     {num:'04',label:'Funnel'},
     {num:'05',label:'Negocio'},
-    {num:'06',label:'CRM / MarTech'},
   ];
   const [sub,setSub]=useState(0);
 
@@ -741,69 +740,54 @@ function CreateProject({onSave, onCancel, initial}){
               </div>
             </div>
           </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
-            <Btn variant='ghost' onClick={()=>setSub(3)}>Atrás</Btn>
-            <Btn onClick={()=>setSub(5)}>Siguiente →</Btn>
-          </div>
-        </div>
-      )}
 
-      {/* STEP 5 — CRM / MarTech */}
-      {sub===5&&(
-        <div>
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'4px'}}>Capa CRM / MarTech</p>
-            <p style={{...T.body,marginBottom:'16px'}}>Conecta las fuentes de datos del cliente para enriquecer los perfiles con comportamiento real de BBDD. Elige el conector o importa un CSV.</p>
-            <p style={{...T.label,marginBottom:'10px'}}>Selecciona tu plataforma</p>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px',marginBottom:'14px'}}>
+            <p style={{...T.h3,marginBottom:'4px'}}>CRM / MarTech <Tag color='amber'>Opcional</Tag></p>
+            <p style={{...T.body,marginBottom:'14px'}}>Conecta la fuente de datos del cliente para enriquecer los perfiles con comportamiento real de BBDD.</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px',marginBottom:'12px'}}>
               {[
                 {id:'salesforce',label:'Salesforce',desc:'Sales Cloud, Marketing Cloud, Commerce Cloud',icon:'☁️',tag:'API'},
                 {id:'sap',label:'SAP',desc:'SAP Commerce, Customer Experience, Analytics',icon:'🔷',tag:'API'},
                 {id:'adobe',label:'Adobe Experience',desc:'Marketo, Analytics, Target, Commerce',icon:'🔴',tag:'API'},
                 {id:'csv',label:'Importar BBDD',desc:'CSV o Excel exportado de cualquier herramienta',icon:'📊',tag:'CSV/XLS'},
-                {id:'otro',label:'Otro conector',desc:'HubSpot, Klaviyo, Mailchimp, SAP, custom endpoint',icon:'🔌',tag:'API'},
+                {id:'otro',label:'Otro conector',desc:'HubSpot, Klaviyo, Mailchimp, custom endpoint',icon:'🔌',tag:'API'},
               ].map(crm=>(
                 <div key={crm.id} onClick={()=>setCrmSeleccionado(crmSeleccionado===crm.id?null:crm.id)}
-                  style={{padding:'14px',borderRadius:'10px',border:`1px solid ${crmSeleccionado===crm.id?C.accent:C.border}`,background:crmSeleccionado===crm.id?C.accentDim:'#070713',cursor:'pointer',position:'relative'}}>
-                  <div style={{position:'absolute',top:'8px',right:'8px',fontSize:'9px',fontWeight:700,padding:'1px 6px',borderRadius:'10px',background:crm.tag==='API'?C.accentDim:C.greenDim,color:crm.tag==='API'?C.accent:C.green}}>{crm.tag}</div>
-                  <div style={{fontSize:'22px',marginBottom:'6px'}}>{crm.icon}</div>
-                  <p style={{fontSize:'13px',fontWeight:600,color:crmSeleccionado===crm.id?C.accent:C.txt,marginBottom:'3px'}}>{crm.label}</p>
+                  style={{padding:'12px',borderRadius:'10px',border:`1px solid ${crmSeleccionado===crm.id?C.accent:C.border}`,background:crmSeleccionado===crm.id?C.accentDim:'#070713',cursor:'pointer',position:'relative'}}>
+                  <div style={{position:'absolute',top:'7px',right:'7px',fontSize:'9px',fontWeight:700,padding:'1px 6px',borderRadius:'10px',background:crm.tag==='API'?C.accentDim:C.greenDim,color:crm.tag==='API'?C.accent:C.green}}>{crm.tag}</div>
+                  <div style={{fontSize:'20px',marginBottom:'5px'}}>{crm.icon}</div>
+                  <p style={{fontSize:'12px',fontWeight:600,color:crmSeleccionado===crm.id?C.accent:C.txt,marginBottom:'2px'}}>{crm.label}</p>
                   <p style={{fontSize:'10px',color:C.txtDim,lineHeight:'1.5'}}>{crm.desc}</p>
                 </div>
               ))}
             </div>
 
-            {/* Si eligen CSV */}
             {crmSeleccionado==='csv'&&(
               <div>
                 <p style={{...T.label,marginBottom:'8px'}}>Subir CSV / Excel de BBDD</p>
                 <div onClick={()=>refCrm.current.click()}
-                  style={{border:`1.5px dashed ${crmCsv?C.green:C.border}`,borderRadius:'10px',padding:'18px',textAlign:'center',cursor:'pointer',background:crmCsv?C.greenDim:'#070713'}}>
+                  style={{border:`1.5px dashed ${crmCsv?C.green:C.border}`,borderRadius:'10px',padding:'16px',textAlign:'center',cursor:'pointer',background:crmCsv?C.greenDim:'#070713'}}>
                   <input ref={refCrm} type='file' accept='.csv,.xlsx,.xls,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setCrmCsv)}/>
-                  <div style={{fontSize:'20px',marginBottom:'6px'}}>📁</div>
+                  <div style={{fontSize:'18px',marginBottom:'5px'}}>📁</div>
                   {crmCsv?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{crmCsv.fileName} · {crmCsv.rows?.length||0} filas</p>
                     :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV/Excel o haz clic</p>}
-                  <p style={{...T.small,marginTop:'4px'}}>Columnas recomendadas: cliente_id, ticket_medio, frecuencia_compra, segmento, ltv, fecha_ultima_compra</p>
+                  <p style={{...T.small,marginTop:'3px'}}>Columnas recomendadas: cliente_id, ticket_medio, frecuencia_compra, segmento, ltv, fecha_ultima_compra</p>
                 </div>
-                {crmCsv&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>✓ Columnas detectadas: {crmCsv.headers?.join(', ')}</div>}
+                {crmCsv&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>✓ Columnas: {crmCsv.headers?.join(', ')}</div>}
               </div>
             )}
 
-            {/* Si eligen API */}
             {crmSeleccionado&&crmSeleccionado!=='csv'&&(
               <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
-                <p style={{color:C.amber,fontWeight:600,marginBottom:'4px'}}>🔌 Integración por API — próximamente</p>
-                <p>La conexión directa con {crmSeleccionado==='salesforce'?'Salesforce':crmSeleccionado==='sap'?'SAP':crmSeleccionado==='adobe'?'Adobe Experience':'tu plataforma'} estará disponible en la versión siguiente. Por ahora puedes exportar tus datos como CSV y subirlos con la opción "Importar BBDD".</p>
-                <button onClick={()=>setCrmSeleccionado('csv')} style={{marginTop:'8px',fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>Usar importación CSV mientras tanto →</button>
+                <p style={{color:C.amber,fontWeight:600,marginBottom:'4px'}}>🔌 Integración API — próximamente</p>
+                <p>La conexión directa con {crmSeleccionado==='salesforce'?'Salesforce':crmSeleccionado==='sap'?'SAP':crmSeleccionado==='adobe'?'Adobe Experience':'esta plataforma'} estará disponible en la siguiente versión.</p>
+                <button onClick={()=>setCrmSeleccionado('csv')} style={{marginTop:'7px',fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>Usar importación CSV mientras tanto →</button>
               </div>
             )}
-
-            {!crmSeleccionado&&(
-              <p style={{...T.small,textAlign:'center',padding:'8px'}}>Sin CRM los perfiles se generarán solo con datos GA4. Puedes añadirlo después desde la edición del proyecto.</p>
-            )}
           </Card>
+
           <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
-            <Btn variant='ghost' onClick={()=>setSub(4)}>Atrás</Btn>
+            <Btn variant='ghost' onClick={()=>setSub(3)}>Atrás</Btn>
             <Btn variant='green' onClick={handleSave}>{isEdit?'Guardar cambios':'Crear proyecto'} ({score()}% precisión)</Btn>
           </div>
         </div>
