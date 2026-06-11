@@ -14,6 +14,7 @@ input,select,textarea,button{font-family:inherit}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .fade{animation:fadeIn 0.25s ease}
+.hidden{display:none!important}
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:#0D0D1A}
 ::-webkit-scrollbar-thumb{background:#2A2A3E;border-radius:2px}
@@ -91,6 +92,46 @@ const Tag=({children,color='default'})=>{
   return <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'20px',background:m.bg,color:m.col}}>{children}</span>;
 };
 
+function Tooltip({text}){
+  const [show,setShow]=useState(false);
+  return(
+    <div style={{position:'relative',display:'inline-flex'}}>
+      <div
+        onMouseEnter={()=>setShow(true)}
+        onMouseLeave={()=>setShow(false)}
+        onClick={()=>setShow(!show)}
+        style={{width:'16px',height:'16px',borderRadius:'50%',background:'#1A1A35',border:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:'10px',color:C.txtMid,flexShrink:0}}>
+        ?
+      </div>
+      {show&&(
+        <div style={{position:'absolute',bottom:'22px',left:'50%',transform:'translateX(-50%)',background:'#1A1A35',border:`1px solid ${C.borderHi}`,borderRadius:'8px',padding:'10px 12px',fontSize:'11px',color:C.txtMid,lineHeight:'1.6',width:'260px',zIndex:100,boxShadow:'0 4px 20px rgba(0,0,0,0.4)'}}>
+          <div style={{color:C.accent,fontWeight:600,marginBottom:'4px',fontSize:'10px',textTransform:'uppercase',letterSpacing:'0.05em'}}>Dónde encontrarlo</div>
+          {text}
+          <div style={{position:'absolute',bottom:'-5px',left:'50%',transform:'translateX(-50%)',width:'8px',height:'8px',background:'#1A1A35',border:`1px solid ${C.borderHi}`,borderBottom:'none',borderRight:'none',transform:'translateX(-50%) rotate(225deg)'}}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KpiInput({label,value,onChange,placeholder,tooltip}){
+  return(
+    <div style={{marginBottom:'4px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'5px'}}>
+        <label style={T.label}>{label}</label>
+        {tooltip&&<Tooltip text={tooltip}/>}
+      </div>
+      <input
+        type='number'
+        value={value}
+        onChange={e=>onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}
+      />
+    </div>
+  );
+}
+
 const Spinner=({text,sub})=>(
   <div style={{textAlign:'center',padding:'56px 20px'}}>
     <div style={{width:'32px',height:'32px',border:`3px solid ${C.border}`,borderTop:`3px solid ${C.accent}`,borderRadius:'50%',animation:'spin 0.8s linear infinite',margin:'0 auto 14px'}}/>
@@ -150,7 +191,7 @@ async function callClaude(apiKey,messages,system){
   const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:2500,system,messages})
+    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:4096,system,messages})
   });
   const data=await res.json();
   if(!data.content) throw new Error(data.error?data.error.message:'Error API');
@@ -600,38 +641,398 @@ function CreateProject({onSave,onCancel}){
 }
 
 // ── CREATE TEST ───────────────────────────────────────────────────────────
+const AVATAR_COLORS=['#6C63FF','#00D4AA','#FF6B9D','#F5A623','#4ECDC4','#A78BFA','#34D399','#FB923C'];
+const NIVEL_CONSCIENCIA=['No consciente del problema','Consciente del problema','Consciente de la solución','Consciente del producto','Listo para comprar'];
+const TIPO_PERFIL_COLOR={esceptico:'amber',cazador_precio:'blue',impulsivo:'green',analitico:'purple',perdido:'default',ideal:'green',recurrente:'green',primerizo:'amber',movil:'blue',escritorio:'default',regalo:'amber',investigador:'default',comparador:'amber',decidido:'green'};
+
+function ProfileModal({profile, idx, onClose}){
+  const col = AVATAR_COLORS[idx%8];
+  const nc = profile.nivel_consciencia||3;
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#0F0F1C',border:`1px solid ${C.borderHi}`,borderRadius:'14px',width:'100%',maxWidth:'580px',maxHeight:'88vh',overflowY:'auto'}}>
+
+        {/* Header */}
+        <div style={{padding:'20px 22px',borderBottom:`1px solid ${C.border}`,display:'flex',gap:'14px',alignItems:'center',position:'sticky',top:0,background:'#0F0F1C',zIndex:1}}>
+          <div style={{width:'48px',height:'48px',borderRadius:'50%',background:col,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'16px',fontWeight:700,color:'#fff',flexShrink:0}}>{profile.initials||'P'+(idx+1)}</div>
+          <div style={{flex:1}}>
+            <p style={{fontSize:'16px',fontWeight:700,color:C.white,marginBottom:'2px'}}>{profile.nombre||`Perfil #${profile.id}`}</p>
+            <p style={{fontSize:'12px',color:C.txtMid}}>{profile.edad} · {profile.profesion||profile.genero} · {profile.ciudad} · {profile.dispositivo}</p>
+          </div>
+          <div style={{textAlign:'right'}}>
+            <div style={{fontSize:'20px',fontWeight:700,color:profile.prob_conversion>0.05?C.green:C.amber}}>{(profile.prob_conversion*100).toFixed(1)}%</div>
+            <div style={{fontSize:'10px',color:C.txtDim}}>prob. conversión</div>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',color:C.txtDim,cursor:'pointer',fontSize:'18px',marginLeft:'8px'}}>✕</button>
+        </div>
+
+        <div style={{padding:'18px 22px',display:'flex',flexDirection:'column',gap:'14px'}}>
+
+          {/* Tipo de perfil */}
+          {profile.tipo_perfil&&(
+            <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+              {(Array.isArray(profile.tipo_perfil)?profile.tipo_perfil:[profile.tipo_perfil]).map(t=>(
+                <Tag key={t} color={TIPO_PERFIL_COLOR[t]||'default'}>{t.replace(/_/g,' ')}</Tag>
+              ))}
+            </div>
+          )}
+
+          {/* Nivel de consciencia */}
+          <div style={{background:'#0A0A18',borderRadius:'10px',padding:'12px 14px'}}>
+            <p style={{...T.label,marginBottom:'10px'}}>Nivel de consciencia (Schwartz)</p>
+            <div style={{display:'flex',gap:'4px'}}>
+              {NIVEL_CONSCIENCIA.map((lbl,i)=>(
+                <div key={i} style={{flex:1,height:'6px',borderRadius:'3px',background:i<nc?C.accent:C.border,position:'relative'}}/>
+              ))}
+            </div>
+            <p style={{fontSize:'12px',color:C.accent,marginTop:'8px',fontWeight:600}}>{nc}/5 — {NIVEL_CONSCIENCIA[nc-1]}</p>
+          </div>
+
+          {/* Contexto de compra */}
+          <div style={{background:'#0A0A18',borderRadius:'10px',padding:'12px 14px'}}>
+            <p style={{...T.label,marginBottom:'10px'}}>Contexto de compra</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+              {[
+                ['Objetivo',profile.objetivo_principal],
+                ['Problema',profile.problema],
+                ['Urgencia',profile.urgencia],
+                ['Presupuesto',profile.presupuesto],
+                ['Experiencia previa',profile.experiencia_previa],
+                ['Nivel digital',profile.nivel_digital||profile.madurez+'/5'],
+              ].filter(([,v])=>v).map(([k,v])=>(
+                <div key={k} style={{background:'#13131F',borderRadius:'7px',padding:'8px 10px'}}>
+                  <div style={{fontSize:'10px',color:C.txtDim,marginBottom:'2px'}}>{k}</div>
+                  <div style={{fontSize:'12px',color:C.txt,fontWeight:500}}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Motivadores */}
+          {profile.motivadores&&profile.motivadores.length>0&&(
+            <div style={{background:'#0A0A18',borderRadius:'10px',padding:'12px 14px'}}>
+              <p style={{...T.label,marginBottom:'10px'}}>Motivadores principales</p>
+              <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
+                {profile.motivadores.map(m=>(
+                  <span key={m} style={{background:C.greenDim,color:C.green,fontSize:'11px',fontWeight:600,padding:'3px 10px',borderRadius:'20px'}}>✓ {m}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Objeciones */}
+          {profile.objeciones&&profile.objeciones.length>0&&(
+            <div style={{background:'#0A0A18',borderRadius:'10px',padding:'12px 14px'}}>
+              <p style={{...T.label,marginBottom:'10px'}}>Objeciones principales</p>
+              <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
+                {profile.objeciones.map(o=>(
+                  <span key={o} style={{background:C.redDim,color:C.red,fontSize:'11px',fontWeight:600,padding:'3px 10px',borderRadius:'20px'}}>⚠ {o}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Comportamiento digital */}
+          <div style={{background:'#0A0A18',borderRadius:'10px',padding:'12px 14px'}}>
+            <p style={{...T.label,marginBottom:'10px'}}>Comportamiento digital</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
+              {[
+                ['Compara alternativas',profile.compara_alternativas],
+                ['Lee reseñas',profile.lee_resenas],
+                ['Busca cupones',profile.busca_cupones],
+                ['Compra impulsivamente',profile.compra_impulsiva],
+                ['Necesita hablar antes',profile.necesita_contacto],
+                ['Canal de entrada',profile.canal],
+              ].filter(([,v])=>v!==undefined&&v!==null).map(([k,v])=>(
+                <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#13131F',borderRadius:'6px',padding:'7px 10px'}}>
+                  <span style={{fontSize:'11px',color:C.txtMid}}>{k}</span>
+                  <span style={{fontSize:'11px',fontWeight:600,color:v===true||v==='sí'||v==='si'?C.green:v===false||v==='no'?C.red:C.txt}}>{v===true||v==='sí'||v==='si'?'Sí':v===false||v==='no'?'No':v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Comportamiento en página */}
+          <div style={{background:'#0A0A18',borderRadius:'10px',padding:'12px 14px'}}>
+            <p style={{...T.label,marginBottom:'10px'}}>Comportamiento en esta página</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'6px'}}>
+              {[
+                ['Tiempo sesión',profile.tiempo_sesion_seg?(profile.tiempo_sesion_seg+'s'):'—'],
+                ['Scroll depth',(profile.scroll_depth||'—')+'%'],
+                ['Prob. conversión',((profile.prob_conversion||0)*100).toFixed(1)+'%'],
+                ['Fase funnel',profile.fase_funnel||'—'],
+                ['Sensib. precio',profile.sensibilidad_precio||'—'],
+                ['Motivación',profile.motivacion||'—'],
+              ].map(([k,v])=>(
+                <div key={k} style={{background:'#13131F',borderRadius:'6px',padding:'7px 8px',textAlign:'center'}}>
+                  <div style={{fontSize:'10px',color:C.txtDim,marginBottom:'2px'}}>{k}</div>
+                  <div style={{fontSize:'12px',color:C.txt,fontWeight:600}}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Cómo reacciona a la variante */}
+          {profile.reaccion_variante&&(
+            <div style={{background:'#0F0F2A',border:`1px solid rgba(108,99,255,0.2)`,borderRadius:'10px',padding:'12px 14px'}}>
+              <p style={{...T.label,marginBottom:'6px',color:C.accent}}>Cómo reaccionará a la variante B</p>
+              <p style={{fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>{profile.reaccion_variante}</p>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileGrid({profiles, sector}){
+  const [selected,setSelected]=useState(null);
+  const tipos={esceptico:'🔍',cazador_precio:'💰',impulsivo:'⚡',analitico:'📊',perdido:'❓',ideal:'⭐',recurrente:'🔄',primerizo:'🆕',movil:'📱',escritorio:'💻',regalo:'🎁',investigador:'🔬',comparador:'⚖️',decidido:'✅'};
+  return(
+    <>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:'10px'}}>
+        {profiles.map((p,i)=>{
+          const tipo=Array.isArray(p.tipo_perfil)?p.tipo_perfil[0]:p.tipo_perfil;
+          const emoji=tipos[tipo]||'👤';
+          const nc=p.nivel_consciencia||3;
+          return(
+            <div key={p.id} onClick={()=>setSelected({p,i})}
+              style={{background:'#0D0D18',border:`1px solid ${C.border}`,borderRadius:'10px',padding:'12px',cursor:'pointer',transition:'border-color 0.15s',':hover':{borderColor:C.accent}}}>
+              <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px'}}>
+                <div style={{width:'34px',height:'34px',borderRadius:'50%',background:AVATAR_COLORS[i%8],display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:700,color:'#fff',flexShrink:0}}>{p.initials||'P'+(i+1)}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:'12px',fontWeight:600,color:C.white,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.nombre||`Perfil #${p.id}`}</div>
+                  <div style={{fontSize:'10px',color:C.txtDim}}>{p.edad} · {p.ciudad}</div>
+                </div>
+                <span style={{fontSize:'16px'}}>{emoji}</span>
+              </div>
+
+              {/* Nivel consciencia mini bar */}
+              <div style={{display:'flex',gap:'2px',marginBottom:'8px'}}>
+                {[1,2,3,4,5].map(n=>(
+                  <div key={n} style={{flex:1,height:'3px',borderRadius:'2px',background:n<=nc?C.accent:C.border}}/>
+                ))}
+              </div>
+
+              <div style={{display:'flex',gap:'4px',flexWrap:'wrap',marginBottom:'8px'}}>
+                {tipo&&<Tag color={TIPO_PERFIL_COLOR[tipo]||'default'}>{emoji} {tipo.replace(/_/g,' ')}</Tag>}
+              </div>
+
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px'}}>
+                <div style={{background:'#13131F',borderRadius:'5px',padding:'4px 6px',textAlign:'center'}}>
+                  <div style={{fontSize:'10px',color:C.txtDim}}>CVR</div>
+                  <div style={{fontSize:'12px',fontWeight:700,color:p.prob_conversion>0.05?C.green:C.amber}}>{((p.prob_conversion||0)*100).toFixed(1)}%</div>
+                </div>
+                <div style={{background:'#13131F',borderRadius:'5px',padding:'4px 6px',textAlign:'center'}}>
+                  <div style={{fontSize:'10px',color:C.txtDim}}>Urgencia</div>
+                  <div style={{fontSize:'11px',fontWeight:600,color:p.urgencia==='alta'?C.red:p.urgencia==='baja'?C.green:C.amber}}>{p.urgencia||'—'}</div>
+                </div>
+              </div>
+
+              {p.objeciones&&p.objeciones.length>0&&(
+                <div style={{marginTop:'7px',fontSize:'10px',color:C.red}}>⚠ {p.objeciones[0]}</div>
+              )}
+              {p.motivadores&&p.motivadores.length>0&&(
+                <div style={{marginTop:'3px',fontSize:'10px',color:C.green}}>✓ {p.motivadores[0]}</div>
+              )}
+
+              <div style={{marginTop:'8px',fontSize:'10px',color:C.txtDim,textAlign:'right'}}>Ver ficha completa →</div>
+            </div>
+          );
+        })}
+      </div>
+      {selected&&<ProfileModal profile={selected.p} idx={selected.i} onClose={()=>setSelected(null)}/>}
+    </>
+  );
+}
+
+function VarianteDesign({label, color, imgName, setImgName, figma, setFigma, refEl}){
+  const hasDesign = imgName || figma;
+  return(
+    <div style={{background:'#070713',border:`1px solid ${hasDesign?color:C.border}`,borderRadius:'10px',padding:'12px',transition:'border-color 0.2s'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'10px'}}>
+        <div style={{width:'8px',height:'8px',borderRadius:'50%',background:color}}/>
+        <p style={{...T.label,color}}>{label}</p>
+        {hasDesign&&<span style={{fontSize:'10px',color:color}}>✓</span>}
+      </div>
+
+      {/* Preview si hay imagen */}
+      {imgName&&!figma&&(
+        <div style={{background:'#0A0A18',borderRadius:'7px',padding:'8px',textAlign:'center',marginBottom:'8px',fontSize:'11px',color:color}}>
+          🖼 {imgName}
+          <button onClick={()=>setImgName('')} style={{marginLeft:'8px',fontSize:'10px',color:C.txtDim,background:'none',border:'none',cursor:'pointer'}}>✕</button>
+        </div>
+      )}
+      {figma&&(
+        <div style={{background:'#0A0A18',borderRadius:'7px',padding:'8px',marginBottom:'8px',fontSize:'11px',color:color,wordBreak:'break-all'}}>
+          🔗 {figma.length>40?figma.slice(0,40)+'...':figma}
+          <button onClick={()=>setFigma('')} style={{marginLeft:'6px',fontSize:'10px',color:C.txtDim,background:'none',border:'none',cursor:'pointer'}}>✕</button>
+        </div>
+      )}
+
+      {/* Upload imagen */}
+      {!figma&&(
+        <div onClick={()=>refEl.current.click()}
+          style={{border:`1.5px dashed ${imgName?color:C.border}`,borderRadius:'8px',padding:'14px',textAlign:'center',cursor:'pointer',background:imgName?'rgba(0,0,0,0.2)':'transparent',marginBottom:'8px'}}>
+          <input ref={refEl} type='file' accept='.jpg,.jpeg,.png,.webp,.pdf' style={{display:'none'}}
+            onChange={e=>{if(e.target.files[0]){setImgName(e.target.files[0].name);setFigma('');}}}/>
+          <div style={{fontSize:'18px',marginBottom:'4px'}}>🖼</div>
+          <p style={{fontSize:'11px',color:imgName?color:C.txtDim}}>{imgName?'Cambiar imagen':'Subir captura JPG/PNG'}</p>
+          <p style={{fontSize:'10px',color:C.txtDim,marginTop:'2px'}}>Diseño, wireframe o captura de pantalla</p>
+        </div>
+      )}
+
+      {/* O Figma */}
+      {!imgName&&(
+        <div>
+          <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'5px'}}>
+            <div style={{flex:1,height:'1px',background:C.border}}/>
+            <span style={{fontSize:'10px',color:C.txtDim}}>o</span>
+            <div style={{flex:1,height:'1px',background:C.border}}/>
+          </div>
+          <input value={figma} onChange={e=>setFigma(e.target.value)} placeholder='Link de Figma / prototipo...'
+            style={{width:'100%',background:'transparent',border:`1px solid ${figma?color:C.border}`,borderRadius:'7px',padding:'8px 10px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+          {figma&&<p style={{fontSize:'10px',color:color,marginTop:'3px'}}>✓ Figma conectado</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TutorialGa4(){
+  const [open,setOpen]=useState(false);
+  return(
+    <div style={{marginBottom:'14px'}}>
+      <button onClick={()=>setOpen(!open)}
+        style={{display:'flex',alignItems:'center',gap:'6px',background:'none',border:`1px solid ${C.border}`,borderRadius:'7px',padding:'7px 12px',cursor:'pointer',color:C.txtMid,fontSize:'12px',width:'100%',justifyContent:'space-between'}}>
+        <span style={{display:'flex',alignItems:'center',gap:'6px'}}>
+          <span style={{color:C.accent}}>📋</span>
+          <span>Cómo crear esta tabla en GA4</span>
+        </span>
+        <span style={{fontSize:'10px',color:C.txtDim}}>{open?'▲ ocultar':'▼ ver instrucciones'}</span>
+      </button>
+
+      {open&&(
+        <div style={{marginTop:'8px',display:'flex',flexDirection:'column',gap:'8px'}}>
+
+          {/* Paso 1 */}
+          <div style={{display:'flex',gap:'10px'}}>
+            <div style={{width:'22px',height:'22px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'11px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:'1px'}}>1</div>
+            <div style={{flex:1,background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
+              <p style={{color:C.txt,fontWeight:600,marginBottom:'3px'}}>Crea la exploración</p>
+              <p>GA4 → <strong style={{color:C.txt}}>Explorar → Exploración en blanco</strong> (Tabla libre)</p>
+            </div>
+          </div>
+
+          {/* Paso 2 */}
+          <div style={{display:'flex',gap:'10px'}}>
+            <div style={{width:'22px',height:'22px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'11px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:'1px'}}>2</div>
+            <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+              <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
+                <p style={{color:C.txt,fontWeight:600,marginBottom:'6px'}}>Dimensiones como filas</p>
+                {[
+                  ['Categoría de dispositivo','Mobile vs desktop'],
+                  ['Tipo de usuario','Nuevo vs recurrente'],
+                ].map(([d,desc])=>(
+                  <div key={d} style={{display:'flex',justifyContent:'space-between',borderBottom:`1px solid ${C.border}`,padding:'3px 0',gap:'6px'}}>
+                    <span style={{color:C.green,fontFamily:'monospace',fontSize:'11px'}}>{d}</span>
+                    <span style={{color:C.txtDim,fontSize:'10px',textAlign:'right'}}>{desc}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
+                <p style={{color:C.txt,fontWeight:600,marginBottom:'6px'}}>Filtro por URL</p>
+                <p style={{marginBottom:'3px'}}>Panel derecho → <strong style={{color:C.txt}}>Filtros → + Añadir</strong></p>
+                <p style={{marginBottom:'3px'}}>Dimensión: <span style={{color:C.green,fontFamily:'monospace',fontSize:'10px'}}>Página + cadena de consulta</span></p>
+                <p>Condición: <strong style={{color:C.txt}}>contiene</strong> → <span style={{color:C.green,fontFamily:'monospace',fontSize:'10px'}}>/tu-pagina</span></p>
+              </div>
+            </div>
+          </div>
+
+          {/* Paso 3 */}
+          <div style={{display:'flex',gap:'10px'}}>
+            <div style={{width:'22px',height:'22px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'11px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:'1px'}}>3</div>
+            <div style={{flex:1,background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
+              <p style={{color:C.txt,fontWeight:600,marginBottom:'6px'}}>Métricas a añadir</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px'}}>
+                {[
+                  ['Sesiones','Volumen por segmento'],
+                  ['Tasa de rebote','¿Se van sin interactuar?'],
+                  ['Tiempo de interacción medio','¿Leen o rebotan?'],
+                  ['Eventos por sesión','Nivel de interacción'],
+                  ['Sesiones con engagement','Calidad de la visita'],
+                  ['Conversiones','Objetivo completado'],
+                  ['Tasa de conversión de sesión','CVR real por segmento'],
+                  ['Páginas por sesión','¿Siguen navegando?'],
+                ].map(([m,desc])=>(
+                  <div key={m} style={{display:'flex',justifyContent:'space-between',borderBottom:`1px solid ${C.border}`,padding:'3px 0',gap:'6px'}}>
+                    <span style={{color:C.green,fontFamily:'monospace',fontSize:'10px'}}>{m}</span>
+                    <span style={{color:C.txtDim,fontSize:'10px',textAlign:'right'}}>{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Paso 4 */}
+          <div style={{display:'flex',gap:'10px'}}>
+            <div style={{width:'22px',height:'22px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'11px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:'1px'}}>4</div>
+            <div style={{flex:1,background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
+              <p style={{color:C.txt,fontWeight:600,marginBottom:'3px'}}>Exportar</p>
+              <p>Arriba a la derecha → <strong style={{color:C.txt}}>icono descarga → Descargar CSV</strong></p>
+              <p style={{marginTop:'5px',color:C.amber}}>💡 Rango recomendado: <strong style={{color:C.txt}}>últimos 90 días</strong> para tener volumen suficiente por segmento.</p>
+            </div>
+          </div>
+
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CreateTest({project,apiKey,onSave,onCancel}){
-  const TSTEPS=['URL y página','Perfiles','Test','QA','Lanzar'];
+  const TSTEPS=['URL y página','Segmentación','Perfiles','Test','QA','Lanzar'];
   const [tsub,setTsub]=useState(0);
   const [url,setUrl]=useState('');
   const [pagina,setPagina]=useState('página de producto');
-  const [tiempo,setTiempo]=useState('');
-  const [rebote,setRebote]=useState('');
-  const [scroll,setScroll]=useState('');
+  const [sesionesTotales,setSesionesTotales]=useState('');
+  const [pctEntrada,setPctEntrada]=useState('');
+  const [tasaSalida,setTasaSalida]=useState('');
+  const [posicionFunnel,setPosicionFunnel]=useState('');
   const [abandono,setAbandono]=useState('');
   const [pageImgs,setPageImgs]=useState({heatmapClics:null,heatmapScroll:null});
   const [csvRutas,setCsvRutas]=useState(null);
   const refCsvRutas=useRef();
   const refHeatClics=useRef();
   const refHeatScroll=useRef();
+  // Segmentación
+  const [segDispositivo,setSegDispositivo]=useState('todos');
+  const [segTipo,setSegTipo]=useState('todos');
+  const [segCanal,setSegCanal]=useState('todos');
   const [profiles,setProfiles]=useState(null);
   const [loadingP,setLoadingP]=useState(false);
   const [errP,setErrP]=useState('');
-  const [nProfiles,setNProfiles]=useState(20);
+  const [nProfiles,setNProfiles]=useState(10);
+  const [nSesiones,setNSesiones]=useState(1000);
+  const [showManual,setShowManual]=useState(false);
   const [hip,setHip]=useState('');
   const [varA,setVarA]=useState('');
   const [varB,setVarB]=useState('');
   const [imgB,setImgB]=useState(null);
+  const [imgAName,setImgAName]=useState('');
   const [imgBName,setImgBName]=useState('');
+  const [figmaUrlA,setFigmaUrlA]=useState('');
   const [figmaUrl,setFigmaUrl]=useState('');
-  const [metricaP,setMetricaP]=useState('tasa de conversión');
+  const imgRef=useRef();
+  const imgRefA=useRef();
+
   const [metricaPCustom,setMetricaPCustom]=useState('');
   const [metricasS,setMetricasS]=useState([]);
   const [split,setSplit]=useState(50);
   const [results,setResults]=useState(null);
   const [loadingSim,setLoadingSim]=useState(false);
   const [errSim,setErrSim]=useState('');
-  const imgRef=useRef();
 
   // Helper: imagen upload para heatmaps
   function ImgUpload({label,hint,field,state,setter,refKey}){
@@ -686,26 +1087,122 @@ function CreateTest({project,apiKey,onSave,onCancel}){
   async function generarPerfiles(){
     setLoadingP(true);setErrP('');
     try{
-      const prompt=`Genera exactamente ${nProfiles} perfiles sintéticos para un ecommerce de ${project.sector}.
+      const tieneSesiones = csvRutas && csvRutas.raw;
 
-DATOS DEL PROYECTO:
-CVR base: ${project.kpis.cvr}%, Ticket: ${project.kpis.ticket}€, Tráfico: ${project.kpis.trafico}/mes
-Mobile: ${project.kpis.mobile}%, Tipo compra: ${project.kpis.tipoCompra}, Recurrentes: ${project.kpis.recurrentes}%
-Canales: ${JSON.stringify(project.canales)}
+      // Si son muchos perfiles, generamos en lotes de 20 para evitar que se corte el JSON
+      const LOTE = 5;
+      const lotes = [];
+      let restantes = nProfiles;
+      let offset = 0;
+      while(restantes > 0){
+        lotes.push({n: Math.min(LOTE, restantes), offset});
+        offset += LOTE;
+        restantes -= LOTE;
+      }
 
-DATOS ESPECÍFICOS DE LA PÁGINA A TESTAR:
-URL: ${url}, Página: ${pagina}
-${tiempo?'Tiempo medio en página: '+tiempo+'s':''}
-${rebote?'Tasa rebote página: '+rebote+'%':''}
-${scroll?'Scroll depth: '+scroll+'%':''}
-${abandono?'Principal abandono: '+abandono:''}
+      const buildPrompt = (n, offset) => `Eres un experto en CRO, psicología del consumidor y analítica web. Genera exactamente ${n} perfiles sintéticos para un ecommerce de ${project.sector}. Los IDs empiezan en ${String(offset+1).padStart(3,'0')}.
 
-Genera perfiles coherentes. prob_conversion anclado al CVR real (${project.kpis.cvr}% media).
-Cada perfil: {"id":"001","edad":"25-34","genero":"mujer","ciudad":"Madrid","dispositivo":"mobile","madurez":4,"canal":"Orgánico / SEO","tipo":"recurrente","prob_conversion":0.041,"scroll_depth":68,"tiempo_sesion_seg":95,"motivacion":"calidad","fase_funnel":"decision","sensibilidad_precio":"media","initials":"MG"}
-SOLO array JSON válido.`;
-      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO con JSON válido sin texto extra.');
-      setProfiles(parseJSON(raw));
-      setTsub(2);
+${tieneSesiones ? `DATOS DE SESIONES REALES (fuente principal — ancla CVR y comportamiento):
+${csvRutas.raw}
+IMPORTANTE: prob_conversion y tiempo_sesion_seg DEBEN venir del CVR y tiempo real del segmento correspondiente.`
+: `DATOS DEL PROYECTO (no hay CSV — infiere comportamiento del sector):
+CVR base: ${project.kpis.cvr}%, Mobile: ${project.kpis.mobile}%, Tipo compra: ${project.kpis.tipoCompra}, Recurrentes: ${project.kpis.recurrentes}%`}
+
+CONTEXTO: Sector ${project.sector}, Ticket ${project.kpis.ticket}€, URL: ${url} (${pagina})
+${sesionesTotales?`Sesiones/mes: ${sesionesTotales}`:''}${pctEntrada?` · Entrada: ${pctEntrada}%`:''}${tasaSalida?` · Salida: ${tasaSalida}%`:''}${posicionFunnel?` · Funnel: ${posicionFunnel}`:''}
+
+SEGMENTO DEL TEST:
+- Dispositivo: ${segDispositivo==='todos'?'Todos':segDispositivo+' ÚNICAMENTE'}
+- Tipo: ${segTipo==='todos'?'Todos':segTipo+' ÚNICAMENTE'}
+- Canal: ${segCanal==='todos'?'Todos':segCanal+' ÚNICAMENTE'}
+${tieneSesiones?'Filtra el CSV por el segmento indicado y usa solo esas filas.':''}
+
+TIPOS DE PERFIL a distribuir (usa los más relevantes para ${project.sector}):
+Arquetipos CRO universales: esceptico, cazador_precio, impulsivo, analitico, perdido, ideal
+Para ecommerce añade: recurrente, primerizo, movil, escritorio, regalo
+Para lead gen / SaaS añade: investigador, comparador, decidido
+
+REGLAS:
+- Distribuye los ${n} perfiles entre los tipos más representativos del sector
+- prob_conversion anclado al CVR real del segmento
+- nivel_consciencia (1-5) coherente con tipo: impulsivo=4-5, investigador=2-3, perdido=1-2
+- urgencia coherente con fase_funnel y tipo
+- objeciones y motivadores específicos para ${project.sector}
+- comportamiento digital coherente con edad y nivel_digital
+
+Devuelve SOLO array JSON. Cada perfil DEBE tener todos estos campos:
+{
+  "id":"001",
+  "nombre":"Ana García",
+  "initials":"AG",
+  "edad":"25-34",
+  "genero":"mujer",
+  "profesion":"Diseñadora freelance",
+  "ciudad":"Madrid",
+  "pais":"España",
+  "dispositivo":"mobile",
+  "nivel_digital":"alto",
+  "canal":"Orgánico / SEO",
+  "tipo":"recurrente",
+  "tipo_perfil":["analitico","recurrente"],
+  "objetivo_principal":"Encontrar zapatillas para running diario",
+  "problema":"Sus zapatillas actuales le dañan la rodilla",
+  "urgencia":"media",
+  "presupuesto":"80-120€",
+  "experiencia_previa":"Ha comprado online 3-4 veces en este sector",
+  "nivel_consciencia":4,
+  "motivadores":["Calidad demostrada","Opiniones de otros runners","Garantía de devolución"],
+  "objeciones":["Precio elevado","No puede probárselas antes"],
+  "compara_alternativas":true,
+  "lee_resenas":true,
+  "busca_cupones":false,
+  "compra_impulsiva":false,
+  "necesita_contacto":false,
+  "prob_conversion":0.041,
+  "scroll_depth":72,
+  "tiempo_sesion_seg":145,
+  "fase_funnel":"decision",
+  "sensibilidad_precio":"media",
+  "motivacion":"calidad",
+  "reaccion_variante":"Analizará el CTA detenidamente. Si el botón transmite más confianza o especifica garantía, aumenta su probabilidad de clic. Sensible a cambios que aporten seguridad, indiferente a urgencia artificial."
+}`;
+
+      // Ejecutar lotes secuencialmente y concatenar
+      let todos = [];
+      for(const lote of lotes){
+        const raw = await callClaude(apiKey,[{role:'user',content:buildPrompt(lote.n, lote.offset)}],'Responde SOLO con un array JSON válido y completo. Sin texto extra ni markdown. Asegúrate de cerrar el array con ]');
+        const parsed = parseJSON(raw);
+        todos = todos.concat(parsed);
+      }
+
+      // Clonar arquetipos hasta nSesiones con variación estadística ±15%
+      function clonarSesiones(arquetipos, total) {
+        const sesiones = [];
+        const porArquetipo = Math.floor(total / arquetipos.length);
+        const resto = total % arquetipos.length;
+        arquetipos.forEach((arq, idx) => {
+          const n = porArquetipo + (idx < resto ? 1 : 0);
+          for(let i = 0; i < n; i++) {
+            const variacion = (v, pct=0.15) => {
+              if(typeof v !== 'number') return v;
+              const delta = v * pct * (Math.random()*2-1);
+              return Math.max(0, Math.round((v + delta) * 1000) / 1000);
+            };
+            sesiones.push({
+              ...arq,
+              id: String(sesiones.length+1).padStart(5,'0'),
+              prob_conversion: Math.min(1, Math.max(0, variacion(arq.prob_conversion, 0.2))),
+              scroll_depth: Math.min(100, Math.max(0, variacion(arq.scroll_depth, 0.15))),
+              tiempo_sesion_seg: Math.max(5, variacion(arq.tiempo_sesion_seg, 0.2)),
+              _arquetipo: arq.id,
+            });
+          }
+        });
+        return sesiones;
+      }
+
+      const clones = clonarSesiones(todos, nSesiones);
+      setProfiles({arquetipos: todos, sesiones: clones, total: nSesiones});
     }catch(e){setErrP('Error: '+e.message);}
     setLoadingP(false);
   }
@@ -713,14 +1210,44 @@ SOLO array JSON válido.`;
   async function simular(){
     setLoadingSim(true);setErrSim('');
     try{
-      const sample=(profiles||[]).slice(0,15).map(p=>({id:p.id,edad:p.edad,genero:p.genero,dispositivo:p.dispositivo,madurez:p.madurez,canal:p.canal,tipo:p.tipo,prob_conversion:p.prob_conversion,motivacion:p.motivacion,fase_funnel:p.fase_funnel,sensibilidad_precio:p.sensibilidad_precio}));
-      const prompt=`Motor simulación A/B. Sector: ${project.sector}. CVR base: ${project.kpis.cvr}%. URL: ${url}. Página: ${pagina}.
-Hipótesis: ${hip}. Variante A: ${varA}. Variante B: ${varB}. Métrica: ${metricaP}. Split: ${split}%A/${100-split}%B.
-Perfiles: ${JSON.stringify(sample)}
-B no gana automáticamente. Considera motivación, fase funnel, sensibilidad precio, dispositivo.
-Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"cvr_b":2.6,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,"segmentos":[{"nombre":"18-24","resultado":"B gana fuerte","diff_pct":22}],"razones_abandono":["razón 1"],"insights":["insight 1"],"recomendacion":"texto"}`;
+      const arquetipos = (profiles?.arquetipos||[]);
+      const totalSesiones = profiles?.total||0;
+      const sample = arquetipos.slice(0,15).map(p=>({
+        id:p.id, nombre:p.nombre, edad:p.edad, genero:p.genero,
+        dispositivo:p.dispositivo, canal:p.canal, tipo:p.tipo,
+        tipo_perfil:p.tipo_perfil, nivel_consciencia:p.nivel_consciencia,
+        prob_conversion:p.prob_conversion, scroll_depth:p.scroll_depth,
+        tiempo_sesion_seg:p.tiempo_sesion_seg, motivacion:p.motivacion,
+        fase_funnel:p.fase_funnel, sensibilidad_precio:p.sensibilidad_precio,
+        motivadores:p.motivadores, objeciones:p.objeciones,
+        urgencia:p.urgencia, compara_alternativas:p.compara_alternativas,
+        lee_resenas:p.lee_resenas, compra_impulsiva:p.compra_impulsiva,
+      }));
+      const prompt=`Motor simulación A/B. Sector: ${project.sector}. CVR base: ${project.kpis.cvr}%.
+URL: ${url}. Página: ${pagina}.
+Hipótesis: ${hip}.
+Variante A: ${varA}. Variante B: ${varB}.
+Métrica principal: ${metricaP}. Split: ${split}%A/${100-split}%B.
+Sesiones totales simuladas: ${totalSesiones.toLocaleString()} (${arquetipos.length} arquetipos × clones estadísticos).
+
+ARQUETIPOS (cada uno representa un % del tráfico total):
+${JSON.stringify(sample,null,2)}
+
+LÓGICA:
+- Para cada arquetipo, calcula cómo reaccionaría a variante A vs B
+- Ten en cuenta: motivadores, objeciones, nivel_consciencia, urgencia, compra_impulsiva, lee_resenas
+- Un escéptico (lee_resenas:true) responde mejor a CTAs con prueba social
+- Un impulsivo (compra_impulsiva:true) responde a urgencia y CTAs directos
+- Un analítico necesita información — cambios que quitan info le perjudican
+- nivel_consciencia 5 = listo para comprar, responde bien a CTAs directos
+- nivel_consciencia 1-2 = necesita educación primero, CTAs agresivos le alejan
+- B NO gana automáticamente — puede perjudicar a ciertos arquetipos
+- Los resultados finales deben escalar al volumen de ${totalSesiones.toLocaleString()} sesiones
+
+Devuelve SOLO JSON:
+{"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"cvr_b":2.6,"sesiones_a":${Math.round(totalSesiones*split/100)},"sesiones_b":${Math.round(totalSesiones*(100-split)/100)},"conversiones_a":0,"conversiones_b":0,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,"segmentos":[{"nombre":"Escéptico","resultado":"B gana","diff_pct":12,"razon":"Nuevo CTA transmite más confianza"}],"razones_abandono":["razón 1","razón 2"],"insights":["insight 1","insight 2"],"recomendacion":"texto accionable"}`;
       const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido.');
-      setResults(parseJSON(raw));setTsub(3);
+      setResults(parseJSON(raw));setTsub(4);
     }catch(e){setErrSim('Error: '+e.message);}
     setLoadingSim(false);
   }
@@ -734,8 +1261,8 @@ Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"
     onSave(t);
   }
 
-  if(loadingP) return <Spinner text='Generando perfiles sintéticos...' sub={`Anclando al CVR real del proyecto (${project.kpis.cvr}%)`}/>;
-  if(loadingSim) return <Spinner text={`Simulando ${(profiles||[]).length} agentes...`} sub='Cada agente decide según motivación, fase de funnel y comportamiento real'/>;
+  if(loadingP) return <Spinner text='Generando perfiles sintéticos...' sub={nProfiles>20?`Generando en lotes — ${nProfiles} perfiles en ${Math.ceil(nProfiles/20)} llamadas`:`Anclando al CVR real del proyecto (${project.kpis.cvr}%)`}/>;
+  if(loadingSim) return <Spinner text={`Simulando ${totalSesiones.toLocaleString()} sesiones...`} sub={`${arquetipos.length} arquetipos × variaciones estadísticas`}/>;
 
   return(
     <div className='fade' style={{padding:'28px 32px',maxWidth:'640px'}}>
@@ -770,48 +1297,64 @@ Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"
               <p style={T.h3}>KPIs de esta página</p>
               <Tag color='amber'>Opcional — mejora perfiles</Tag>
             </div>
-            <p style={{...T.body,marginBottom:'14px'}}>Datos específicos de esta URL, no del site global. Cuanto más precisos, mejor simularán los agentes esta página concreta.</p>
-            <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 13px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7',marginBottom:'14px'}}>
-              💡 <strong style={{color:C.txt}}>Cómo obtenerlos en GA4:</strong> Explorar → Exploración en blanco → añade filtro <span style={{color:C.green,fontFamily:'monospace'}}>Página + cadena de consulta</span> con la URL exacta → métricas: Vistas, Usuarios activos, T. interacción medio, Tasa de engagement, Tasa de rebote, Conversiones, CVR de sesión, Eventos por sesión.
+            <p style={{...T.body,marginBottom:'16px'}}>
+              Visión general de esta URL que complementa el CSV de sesiones. Datos que no vienen por segmento pero dan contexto a la IA sobre el peso e importancia de esta página.
+            </p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
+
+              <KpiInput
+                label='Sesiones totales / mes'
+                value={sesionesTotales}
+                onChange={setSesionesTotales}
+                placeholder='Ej: 14.500'
+                tooltip='GA4 → Informes → Páginas y pantallas → busca tu URL → columna "Vistas" o "Sesiones". También en Explorar filtrando por esta URL.'
+              />
+
+              <KpiInput
+                label='% tráfico de entrada al site'
+                value={pctEntrada}
+                onChange={setPctEntrada}
+                placeholder='Ej: 12'
+                tooltip='GA4 → Informes → Páginas y pantallas → divide las sesiones de esta URL entre las sesiones totales del site × 100. Te dice cuánto peso tiene esta página en el total.'
+              />
+
+              <KpiInput
+                label='Tasa de salida (%)'
+                value={tasaSalida}
+                onChange={setTasaSalida}
+                placeholder='Ej: 34'
+                tooltip='GA4 → Informes → Páginas y pantallas → columna "Tasa de salida". Es el % de usuarios que salen del site desde esta página. Diferente al rebote: el rebote entra y sale sin navegar, la salida puede ocurrir después de visitar varias páginas.'
+              />
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'10px'}}>
-              <Input label='Tiempo medio en página (seg)' value={tiempo} onChange={setTiempo} type='number' placeholder='95'/>
-              <Input label='Tasa de rebote de esta página (%)' value={rebote} onChange={setRebote} type='number' placeholder='38'/>
-              <Input label='Scroll depth medio (%)' value={scroll} onChange={setScroll} type='number' placeholder='65'/>
-              <div>
-                <label style={{...T.label,display:'block',marginBottom:'5px'}}>Principal zona de abandono</label>
-                <select value={abandono} onChange={e=>setAbandono(e.target.value)}
-                  style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
-                  <option value=''>No lo sé</option>
-                  <optgroup label='— Antes de ver contenido'>
-                    <option>Nada más entrar — rebote inmediato</option>
-                    <option>Sin hacer scroll — no llegan al contenido</option>
-                    <option>Antes del primer CTA visible</option>
-                  </optgroup>
-                  <optgroup label='— Durante la navegación'>
-                    <option>Al ver el precio</option>
-                    <option>Al ver los gastos de envío</option>
-                    <option>En la galería de imágenes</option>
-                    <option>En la descripción del producto</option>
-                    <option>Al leer las valoraciones / reviews</option>
-                    <option>En el selector de talla / variante</option>
-                    <option>Antes del CTA principal (comprar / reservar)</option>
-                  </optgroup>
-                  <optgroup label='— En el proceso de compra'>
-                    <option>Al hacer clic en el CTA — no continúan</option>
-                    <option>En el carrito — ven el total y salen</option>
-                    <option>En el formulario de datos</option>
-                    <option>En la selección de método de pago</option>
-                    <option>En el checkout — proceso demasiado largo</option>
-                    <option>En la confirmación — error o desconfianza</option>
-                  </optgroup>
-                  <optgroup label='— Navegación interna'>
-                    <option>Van a otra categoría — no encuentran lo que buscan</option>
-                    <option>Usan el buscador interno — no encuentran producto</option>
-                    <option>Vuelven atrás desde esta página</option>
-                  </optgroup>
-                </select>
+
+            <div>
+              <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'5px'}}>
+                <label style={T.label}>Posición en el funnel</label>
+                <Tooltip text='Define en qué momento del proceso de compra está esta página. Afecta directamente a cómo simula la IA la intención del usuario: no es lo mismo llegar a una homepage que a un checkout.'/>
               </div>
+              <select value={posicionFunnel} onChange={e=>setPosicionFunnel(e.target.value)}
+                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:posicionFunnel?C.txt:C.txtDim,fontSize:'13px',outline:'none',marginBottom:'12px'}}>
+                <option value=''>Seleccionar posición...</option>
+                <optgroup label='— Captación'>
+                  <option value='entrada'>Página de entrada — primer contacto con el site</option>
+                  <option value='landing'>Landing de campaña — tráfico de pago directo</option>
+                </optgroup>
+                <optgroup label='— Consideración'>
+                  <option value='categoria'>Categoría — está explorando opciones</option>
+                  <option value='busqueda'>Resultados de búsqueda interna</option>
+                  <option value='producto'>Ficha de producto — evaluando en detalle</option>
+                  <option value='comparador'>Comparador — entre varias opciones</option>
+                </optgroup>
+                <optgroup label='— Decisión'>
+                  <option value='carrito'>Carrito — intención alta, aún puede abandonar</option>
+                  <option value='checkout'>Checkout — proceso de compra iniciado</option>
+                  <option value='pago'>Página de pago — último paso antes de convertir</option>
+                </optgroup>
+                <optgroup label='— Post-conversión'>
+                  <option value='confirmacion'>Confirmación de pedido</option>
+                  <option value='cuenta'>Mi cuenta / área privada</option>
+                </optgroup>
+              </select>
             </div>
           </Card>
 
@@ -828,95 +1371,64 @@ Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"
             </div>
           </Card>
 
-          {/* CSV rutas */}
-          <Card style={{marginBottom:'12px'}}>
+          {/* CSV sesiones de la URL — protagonista */}
+          <Card style={{marginBottom:'12px',border:`1px solid ${C.accent}`}}>
             <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
-              <p style={T.h3}>CSV de comportamiento en esta URL</p>
-              <Tag color='amber'>Opcional — muy recomendado</Tag>
+              <p style={T.h3}>Sesiones de esta página por segmento</p>
+              <Tag color='purple'>Clave para los perfiles</Tag>
             </div>
-            <p style={{...T.body,marginBottom:'12px'}}>Crea una exploración en GA4 filtrada por esta URL concreta. Muestra cómo navegan los distintos segmentos en esta página y qué diferencia a los que convierten de los que no.</p>
+            <p style={{...T.body,marginBottom:'14px'}}>
+              Este CSV es el dato más importante del test. Cada fila se convierte en un arquetipo con comportamiento real anclado a esa URL — tiempo en página, rebote, interacción y CVR real por segmento.
+            </p>
 
-            {/* Tutorial en dos columnas */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'12px'}}>
-
-              {/* Col izq — cómo filtrar */}
-              <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>
-                <p style={{color:C.txt,fontWeight:600,marginBottom:'8px',display:'flex',alignItems:'center',gap:'6px'}}>
-                  <span style={{color:C.accent}}>▽</span> Cómo filtrar la URL
-                </p>
-                <div style={{display:'flex',gap:'8px',marginBottom:'7px'}}>
-                  <span style={{width:'18px',height:'18px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'10px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>1</span>
-                  <div><p style={{color:C.txt,fontWeight:500}}>Añade el filtro en la exploración</p><p>En el panel derecho → Filtros → + Añadir filtro</p></div>
-                </div>
-                <div style={{display:'flex',gap:'8px',marginBottom:'7px'}}>
-                  <span style={{width:'18px',height:'18px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'10px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>2</span>
-                  <div><p style={{color:C.txt,fontWeight:500}}>Dimensión a filtrar</p><p><span style={{color:C.green,fontFamily:'monospace'}}>Página + cadena de consulta</span><br/>o bien <span style={{color:C.green,fontFamily:'monospace'}}>Ruta de página</span> si no hay query string</p></div>
-                </div>
-                <div style={{display:'flex',gap:'8px'}}>
-                  <span style={{width:'18px',height:'18px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'10px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>3</span>
-                  <div><p style={{color:C.txt,fontWeight:500}}>Condición</p><p>Usa <strong style={{color:C.txt}}>contiene</strong> si la URL puede variar, o <strong style={{color:C.txt}}>exactamente coincide</strong> si es fija<br/><span style={{color:C.green,fontFamily:'monospace'}}>/ruta-de-tu-pagina</span></p></div>
-                </div>
-              </div>
-
-              {/* Col der — dimensiones */}
-              <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>
-                <p style={{color:C.txt,fontWeight:600,marginBottom:'8px',display:'flex',alignItems:'center',gap:'6px'}}>
-                  <span style={{color:C.accent}}>▦</span> Dimensiones como filas
-                </p>
-                {[
-                  ['Página + cadena de consulta','URL exacta'],
-                  ['Canal de sesión','De dónde viene el tráfico'],
-                  ['Tipo de usuario','Nuevo vs recurrente'],
-                  ['Categoría de dispositivo','Mobile vs desktop'],
-                  ['País','Si hay variación geográfica'],
-                  ['Segmento de audiencia','Si tienes audiencias creadas'],
-                ].map(([dim,desc])=>(
-                  <div key={dim} style={{display:'flex',justifyContent:'space-between',borderBottom:`1px solid ${C.border}`,padding:'3px 0'}}>
-                    <span style={{color:C.green,fontFamily:'monospace',fontSize:'11px'}}>{dim}</span>
-                    <span style={{color:C.txtDim,fontSize:'11px',textAlign:'right',maxWidth:'120px'}}>{desc}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Métricas */}
-            <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8',marginBottom:'12px'}}>
-              <p style={{color:C.txt,fontWeight:600,marginBottom:'8px',display:'flex',alignItems:'center',gap:'6px'}}>
-                <span style={{color:C.accent}}>↗</span> Métricas imprescindibles para la URL
+            {/* Tabla ejemplo */}
+            <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',marginBottom:'14px',overflowX:'auto'}}>
+              <p style={{...T.label,marginBottom:'8px',color:C.accent}}>Estructura esperada — cada fila = un arquetipo de perfil</p>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
+                <thead>
+                  <tr style={{borderBottom:`1px solid ${C.border}`}}>
+                    {['dispositivo','tipo_usuario','sesiones','tiempo_medio','tasa_rebote','eventos_sesion','pagina_salida','conversiones','cvr'].map(h=>(
+                      <th key={h} style={{padding:'4px 8px',textAlign:'left',color:C.accent,fontWeight:600,whiteSpace:'nowrap'}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ['mobile','nuevo','1.240','48s','71%','1.2','/carrito','10','0.8%'],
+                    ['mobile','recurrente','380','95s','28%','3.1','/checkout','15','3.9%'],
+                    ['desktop','nuevo','520','142s','38%','2.8','/categoria','11','2.1%'],
+                    ['desktop','recurrente','210','240s','9%','5.4','—','14','6.8%'],
+                  ].map((row,i)=>(
+                    <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?'transparent':'#0A0A16'}}>
+                      {row.map((cell,j)=>(
+                        <td key={j} style={{padding:'5px 8px',color:j<=1?C.txt:j===8?C.green:C.txtMid,whiteSpace:'nowrap'}}>{cell}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{...T.small,marginTop:'8px',color:C.txtDim}}>
+                La IA usará <span style={{color:C.green}}>sesiones</span> para distribuir perfiles · <span style={{color:C.green}}>tiempo + rebote + eventos</span> para simular comportamiento · <span style={{color:C.green}}>cvr</span> para anclar prob_conversion
               </p>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px'}}>
-                {[
-                  ['Vistas','Volumen total de tráfico'],
-                  ['Tasa de rebote','Entran y se van sin interactuar'],
-                  ['Usuarios activos','Personas únicas que la ven'],
-                  ['Conversiones','Objetivo completado desde esta página'],
-                  ['Tiempo de interacción medio','¿Leen o rebotan?'],
-                  ['Tasa de conversión de sesión','% sesiones que convierten'],
-                  ['Tasa de engagement','% sesiones con interacción real'],
-                  ['Eventos por sesión','Nivel de interacción'],
-                  ['Sesiones con engagement','Sesiones de calidad'],
-                  ['Vistas por usuario','¿Vuelven a esta página?'],
-                ].map(([met,desc])=>(
-                  <div key={met} style={{display:'flex',justifyContent:'space-between',borderBottom:`1px solid ${C.border}`,padding:'3px 0',gap:'8px'}}>
-                    <span style={{color:C.green,fontFamily:'monospace',fontSize:'11px',flexShrink:0}}>{met}</span>
-                    <span style={{color:C.txtDim,fontSize:'11px',textAlign:'right'}}>{desc}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{marginTop:'10px',padding:'8px 10px',background:'#0D1A2E',borderRadius:'6px',border:`1px solid rgba(75,158,255,0.2)`}}>
-                <p style={{fontSize:'11px',color:C.blue,lineHeight:'1.6'}}>
-                  💡 <strong style={{color:C.txt}}>Truco:</strong> pon la dimensión en filas y los segmentos (canal, dispositivo, nuevo/recurrente) como desglose secundario. Así en una sola tabla ves el comportamiento de cada perfil en esa URL.
-                </p>
-              </div>
             </div>
 
+            {/* Tutorial desplegable */}
+            <TutorialGa4/>
+
+            {/* Upload */}
             <CsvUploadSimple
               label='Subir CSV exportado de GA4'
-              hint='Exportar → Descargar CSV desde la exploración configurada arriba'
+              hint='Columnas: dispositivo, tipo_usuario, sesiones, tiempo_medio, tasa_rebote, eventos_sesion, pagina_salida, conversiones, cvr'
               parsed={csvRutas}
               setter={setCsvRutas}
               refEl={refCsvRutas}
             />
+
+            {csvRutas&&(
+              <div style={{marginTop:'10px',padding:'10px 12px',background:C.greenDim,border:`1px solid rgba(0,212,170,0.2)`,borderRadius:'8px',fontSize:'12px',color:C.green,lineHeight:'1.6'}}>
+                ✓ <strong>{csvRutas.rows.length} segmentos detectados.</strong> Cada uno generará perfiles sintéticos con comportamiento real anclado a sus datos de sesión.
+              </div>
+            )}
           </Card>
 
           <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
@@ -928,58 +1440,203 @@ Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"
 
       {tsub===1&&(
         <div>
+          <p style={{...T.h3,marginBottom:'4px'}}>¿A quién va dirigido este test?</p>
+          <p style={{...T.body,marginBottom:'20px'}}>Define el segmento antes de generar los perfiles. La IA usará solo las filas relevantes del CSV de sesiones y generará agentes de ese segmento concreto.</p>
+
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'8px'}}>Generación de perfiles sintéticos</p>
-            <p style={{...T.body,marginBottom:'14px'}}>La IA combina la base del proyecto con los datos específicos de la página para crear agentes realistas.</p>
-            <Select label='Número de perfiles' value={nProfiles} onChange={v=>setNProfiles(Number(v))} options={[{value:10,label:'10 — prueba rápida'},{value:20,label:'20 — demo recomendado'},{value:50,label:'50 — más representativo'}]}/>
-            <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 13px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>
-              📊 Usando datos base del proyecto: CVR {project.kpis.cvr}% · {project.kpis.mobile}% mobile · sector {project.sector}
+            <p style={{...T.label,marginBottom:'14px'}}>Dispositivo</p>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'8px',marginBottom:'6px'}}>
+              {[
+                {v:'todos',label:'Todos',icon:'📱💻'},
+                {v:'mobile',label:'Solo mobile',icon:'📱'},
+                {v:'desktop',label:'Solo desktop',icon:'💻'},
+                {v:'tablet',label:'Solo tablet',icon:'⬜'},
+              ].map(op=>(
+                <div key={op.v} onClick={()=>setSegDispositivo(op.v)}
+                  style={{padding:'12px 8px',borderRadius:'8px',border:`1px solid ${segDispositivo===op.v?C.accent:C.border}`,background:segDispositivo===op.v?C.accentDim:'transparent',cursor:'pointer',textAlign:'center'}}>
+                  <div style={{fontSize:'18px',marginBottom:'4px'}}>{op.icon}</div>
+                  <div style={{fontSize:'11px',fontWeight:600,color:segDispositivo===op.v?C.accent:C.txtMid}}>{op.label}</div>
+                </div>
+              ))}
             </div>
+            {csvRutas&&segDispositivo!=='todos'&&(
+              <div style={{fontSize:'11px',color:C.green,marginTop:'6px'}}>
+                ✓ Se usarán solo las filas <strong>{segDispositivo}</strong> del CSV ({csvRutas.rows.filter(r=>r.dispositivo?.toLowerCase().includes(segDispositivo)||r['Categoría de dispositivo']?.toLowerCase().includes(segDispositivo)).length} filas)
+              </div>
+            )}
+          </Card>
+
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.label,marginBottom:'14px'}}>Tipo de usuario</p>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px'}}>
+              {[
+                {v:'todos',label:'Todos',desc:'Nuevos y recurrentes',icon:'👥'},
+                {v:'nuevo',label:'Solo nuevos',desc:'Primera visita al site',icon:'🆕'},
+                {v:'recurrente',label:'Solo recurrentes',desc:'Ya conocen la marca',icon:'🔄'},
+              ].map(op=>(
+                <div key={op.v} onClick={()=>setSegTipo(op.v)}
+                  style={{padding:'12px',borderRadius:'8px',border:`1px solid ${segTipo===op.v?C.accent:C.border}`,background:segTipo===op.v?C.accentDim:'transparent',cursor:'pointer'}}>
+                  <div style={{fontSize:'18px',marginBottom:'5px'}}>{op.icon}</div>
+                  <div style={{fontSize:'12px',fontWeight:600,color:segTipo===op.v?C.accent:C.txt,marginBottom:'2px'}}>{op.label}</div>
+                  <div style={{fontSize:'11px',color:C.txtDim}}>{op.desc}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card style={{marginBottom:'12px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'14px'}}>
+              <p style={T.label}>Canal de entrada</p>
+              <Tag color='default'>Opcional</Tag>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px'}}>
+              {[
+                {v:'todos',label:'Todos los canales',icon:'🌐'},
+                {v:'organico',label:'Orgánico / SEO',icon:'🔍'},
+                {v:'paid',label:'Paid (SEM/Social)',icon:'💰'},
+                {v:'email',label:'Email / Newsletter',icon:'📧'},
+                {v:'social',label:'Social orgánico',icon:'📲'},
+                {v:'directo',label:'Directo',icon:'🎯'},
+              ].map(op=>(
+                <div key={op.v} onClick={()=>setSegCanal(op.v)}
+                  style={{padding:'10px',borderRadius:'8px',border:`1px solid ${segCanal===op.v?C.green:C.border}`,background:segCanal===op.v?C.greenDim:'transparent',cursor:'pointer',display:'flex',alignItems:'center',gap:'8px'}}>
+                  <span style={{fontSize:'14px'}}>{op.icon}</span>
+                  <span style={{fontSize:'11px',fontWeight:600,color:segCanal===op.v?C.green:C.txtMid}}>{op.label}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Resumen del segmento */}
+          <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',marginBottom:'16px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
+            <p style={{color:C.txt,fontWeight:600,marginBottom:'4px'}}>Segmento seleccionado</p>
+            <p>
+              <span style={{color:C.accent}}>Dispositivo:</span> {segDispositivo==='todos'?'Todos':segDispositivo} &nbsp;·&nbsp;
+              <span style={{color:C.accent}}>Usuario:</span> {segTipo==='todos'?'Todos':segTipo} &nbsp;·&nbsp;
+              <span style={{color:C.accent}}>Canal:</span> {segCanal==='todos'?'Todos':segCanal}
+            </p>
+            {csvRutas
+              ? <p style={{color:C.green,marginTop:'4px'}}>✓ La IA filtrará el CSV de sesiones por este segmento para anclar los perfiles a datos reales.</p>
+              : <p style={{color:C.amber,marginTop:'4px'}}>⚠ Sin CSV de sesiones — la IA inferirá el comportamiento de este segmento a partir de los datos del proyecto.</p>
+            }
+          </div>
+
+          <div style={{display:'flex',justifyContent:'space-between',marginTop:'4px'}}>
+            <Btn variant='ghost' onClick={()=>setTsub(0)}>Atrás</Btn>
+            <Btn onClick={()=>setTsub(2)}>Continuar →</Btn>
+          </div>
+        </div>
+      )}
+
+      {tsub===2&&(
+        <div>
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'8px'}}>Perfiles sintéticos</p>
+            <p style={{...T.body,marginBottom:'14px'}}>Cada perfil combina psicología CRO real — motivaciones, objeciones, nivel de consciencia — con comportamiento anclado a los datos de sesión de esta URL.</p>
+
+            <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginBottom:'12px'}}>
+              <Tag color='purple'>📱 {segDispositivo==='todos'?'Todos los dispositivos':segDispositivo}</Tag>
+              <Tag color='purple'>👤 {segTipo==='todos'?'Todos los usuarios':segTipo}</Tag>
+              {segCanal!=='todos'&&<Tag color='purple'>🔗 {segCanal}</Tag>}
+              <button onClick={()=>setTsub(1)} style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>cambiar segmento</button>
+            </div>
+
+            {/* Recomendación automática */}
+            {(()=>{
+              const trafico = parseInt(sesionesTotales)||parseInt(project.kpis.trafico)||0;
+              const recArquetipos = trafico<2000?6:trafico<10000?10:trafico<50000?15:trafico<100000?20:30;
+              const recSesiones = trafico<500?100:trafico<2000?500:trafico<10000?Math.min(trafico,2500):trafico<50000?5000:trafico<100000?10000:20000;
+              const razonArq = trafico<2000?'Tráfico bajo — cubre los patrones principales':trafico<10000?'Tráfico medio — representación suficiente de todos los patrones':trafico<50000?'Tráfico medio-alto — captura segmentos minoritarios':'Alto tráfico — alta diversidad de perfiles';
+              const razonSes = trafico===0?'Introduce sesiones/mes en los KPIs para una recomendación precisa':`Basado en ${trafico.toLocaleString()} sesiones/mes de esta URL`;
+              if(nProfiles===10&&nSesiones===1000&&trafico>0){
+                setTimeout(()=>{setNProfiles(recArquetipos);setNSesiones(recSesiones);},0);
+              }
+              return(
+                <div>
+                  <div style={{background:'#0A1220',border:`1px solid ${C.accent}`,borderRadius:'10px',padding:'14px 16px',marginBottom:'10px'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px'}}>
+                      <span>✦</span>
+                      <p style={{fontSize:'13px',fontWeight:600,color:C.accent}}>Configuración recomendada para esta URL</p>
+                    </div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+                      <div style={{background:'#070713',borderRadius:'8px',padding:'10px 12px',textAlign:'center'}}>
+                        <div style={{fontSize:'28px',fontWeight:700,color:C.white,marginBottom:'2px'}}>{recArquetipos}</div>
+                        <div style={{fontSize:'11px',color:C.accent,fontWeight:600,marginBottom:'4px'}}>arquetipos</div>
+                        <div style={{fontSize:'10px',color:C.txtDim,lineHeight:'1.5'}}>{razonArq}</div>
+                      </div>
+                      <div style={{background:'#070713',borderRadius:'8px',padding:'10px 12px',textAlign:'center'}}>
+                        <div style={{fontSize:'28px',fontWeight:700,color:C.white,marginBottom:'2px'}}>{recSesiones.toLocaleString()}</div>
+                        <div style={{fontSize:'11px',color:C.accent,fontWeight:600,marginBottom:'4px'}}>sesiones</div>
+                        <div style={{fontSize:'10px',color:C.txtDim,lineHeight:'1.5'}}>{razonSes}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button onClick={()=>setShowManual(v=>!v)}
+                    style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer',textDecoration:'underline',marginBottom:'8px',display:'block'}}>
+                    {showManual?'▲ Ocultar edición manual':'▼ Editar manualmente'}
+                  </button>
+
+                  {showManual&&(
+                    <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',marginBottom:'8px'}}>
+                      <Select label='Arquetipos maestros' value={nProfiles} onChange={v=>setNProfiles(Number(v))} options={[
+                        {value:6,label:'6 arquetipos — mínimo viable'},
+                        {value:10,label:'10 arquetipos — estándar'},
+                        {value:15,label:'15 arquetipos — completo'},
+                        {value:20,label:'20 arquetipos — representativo'},
+                        {value:30,label:'30 arquetipos — alto detalle'},
+                        {value:50,label:'50 arquetipos — máximo'},
+                      ]}/>
+                      <div style={{marginTop:'4px'}}>
+                        <label style={{...T.label,display:'block',marginBottom:'6px'}}>
+                          Sesiones a simular: <span style={{color:C.accent,fontWeight:700}}>{nSesiones.toLocaleString()}</span>
+                        </label>
+                        <input type='range' min='100' max='20000' step='100' value={nSesiones}
+                          onChange={e=>setNSesiones(Number(e.target.value))}
+                          style={{width:'100%',accentColor:C.accent,marginBottom:'4px'}}/>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:'10px',color:C.txtDim}}>
+                          {['100','1k','2.5k','5k','10k','20k'].map(v=><span key={v}>{v}</span>)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {errP&&<p style={{color:C.red,fontSize:'12px',marginTop:'8px'}}>⚠ {errP}</p>}
           </Card>
 
-          {/* Perfiles generados — se muestran aquí mismo */}
           {profiles&&(
-            <Card style={{marginBottom:'12px'}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px'}}>
+            <div style={{marginBottom:'12px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
                 <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
-                  <Tag color='green'>{profiles.length} perfiles generados</Tag>
-                  <Tag color='blue'>{project.sector}</Tag>
+                  <Tag color='green'>{profiles.arquetipos.length} arquetipos</Tag>
+                  <Tag color='blue'>{profiles.total.toLocaleString()} sesiones</Tag>
                   <Tag color='amber'>{project.quality||72}% precisión</Tag>
                 </div>
-
+                <p style={{...T.small}}>Haz clic en un perfil para ver la ficha completa</p>
               </div>
-              <div style={{maxHeight:'380px',overflowY:'auto'}}>
-                {profiles.map((p,i)=>(
-                  <div key={p.id} style={{display:'flex',alignItems:'center',gap:'10px',padding:'8px 0',borderBottom:`1px solid ${C.border}`}}>
-                    <div style={{width:'30px',height:'30px',borderRadius:'50%',background:['#6C63FF','#00D4AA','#FF6B9D','#F5A623','#4ECDC4'][i%5],display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:700,color:'#fff',flexShrink:0}}>{p.initials||'P'+(i+1)}</div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:'12px',color:C.txt,fontWeight:500}}>#{p.id} · {p.edad} · {p.genero} · {p.dispositivo}</div>
-                      <div style={{fontSize:'11px',color:C.txtDim,marginTop:'1px'}}>{p.ciudad} · {p.canal} · {p.tipo} · {p.fase_funnel} · motiv: {p.motivacion}</div>
-                    </div>
-                    <div style={{display:'flex',gap:'5px',flexShrink:0}}>
-                      <Tag color={p.prob_conversion>0.05?'green':'amber'}>CVR {(p.prob_conversion*100).toFixed(1)}%</Tag>
-                      <Tag color={p.sensibilidad_precio==='alta'?'red':p.sensibilidad_precio==='baja'?'green':'default'}>{p.sensibilidad_precio}</Tag>
-                    </div>
-                  </div>
-                ))}
+              <div style={{background:'#0A0A18',border:`1px solid ${C.greenDim}`,borderRadius:'8px',padding:'9px 12px',marginBottom:'12px',fontSize:'12px',color:C.green,lineHeight:'1.6'}}>
+                ✓ <strong>{profiles.arquetipos.length} arquetipos maestros</strong> clonados en <strong>{profiles.total.toLocaleString()} sesiones</strong> con variación estadística ±15% en CVR, scroll y tiempo.
               </div>
-            </Card>
+              <ProfileGrid profiles={profiles.arquetipos} sector={project.sector}/>
+            </div>
           )}
 
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'12px'}}>
-            <Btn variant='ghost' onClick={()=>setTsub(0)}>Atrás</Btn>
+            <Btn variant='ghost' onClick={()=>setTsub(1)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
               <Btn variant='ghost' onClick={()=>{setProfiles(null);generarPerfiles();}}>
                 {profiles?'Regenerar':'Generar perfiles'}
               </Btn>
-              <Btn disabled={!profiles} onClick={()=>setTsub(2)}>Continuar →</Btn>
+              <Btn disabled={!profiles} onClick={()=>setTsub(3)}>Continuar →</Btn>
             </div>
           </div>
         </div>
       )}
 
-      {tsub===2&&profiles&&(
+      {tsub===3&&profiles&&profiles.arquetipos&&(
         <div>
           <Card style={{marginBottom:'12px'}}>
             <p style={{...T.h3,marginBottom:'14px'}}>Configuración del test</p>
@@ -992,37 +1649,26 @@ Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"
               <p style={{...T.small,marginTop:'3px'}}>Cambio propuesto + efecto esperado + razón basada en datos.</p>
             </div>
 
-            {/* Variantes */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'14px'}}>
+            {/* Variantes — descripción */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'16px'}}>
               <div>
-                <label style={{...T.label,display:'block',marginBottom:'5px'}}><Tag color='purple'>Variante A</Tag> Control actual <span style={{color:C.red}}>*</span></label>
-                <input value={varA} onChange={e=>setVarA(e.target.value)} placeholder="Ej: Botón azul 'Añadir al carrito'"
+                <label style={{...T.label,display:'block',marginBottom:'5px'}}><Tag color='purple'>Variante A</Tag> <span style={{color:C.red}}>*</span></label>
+                <input value={varA} onChange={e=>setVarA(e.target.value)} placeholder="Ej: Diseño actual — botón azul"
                   style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
               </div>
               <div>
-                <label style={{...T.label,display:'block',marginBottom:'5px'}}><Tag color='green'>Variante B</Tag> Cambio propuesto <span style={{color:C.red}}>*</span></label>
-                <input value={varB} onChange={e=>setVarB(e.target.value)} placeholder="Ej: Botón verde 'Comprar ahora'"
+                <label style={{...T.label,display:'block',marginBottom:'5px'}}><Tag color='green'>Variante B</Tag> <span style={{color:C.red}}>*</span></label>
+                <input value={varB} onChange={e=>setVarB(e.target.value)} placeholder="Ej: Rediseño propuesto — CTA verde"
                   style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
               </div>
             </div>
 
-            {/* Diseño variante B */}
-            <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px',marginBottom:'14px'}}>
-              <p style={{...T.label,marginBottom:'10px'}}>Diseño de Variante B <Tag color='amber'>Opcional</Tag></p>
-              <div style={{display:'flex',gap:'8px'}}>
-                <div onClick={()=>imgRef.current.click()} style={{flex:1,border:`1px dashed ${imgBName?C.green:C.border}`,borderRadius:'8px',padding:'12px',textAlign:'center',cursor:'pointer',background:imgBName?C.greenDim:'transparent'}}>
-                  <input ref={imgRef} type='file' accept='.jpg,.jpeg,.png,.webp' style={{display:'none'}} onChange={e=>{if(e.target.files[0]){setImgBName(e.target.files[0].name);setFigmaUrl('');}}}/>
-                  <div style={{fontSize:'16px',marginBottom:'4px'}}>🖼</div>
-                  <p style={{fontSize:'11px',color:imgBName?C.green:C.txtDim}}>{imgBName||'Subir JPG/PNG'}</p>
-                </div>
-                <div style={{display:'flex',alignItems:'center',color:C.txtDim,fontSize:'12px'}}>o</div>
-                <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'center'}}>
-                  <input value={figmaUrl} onChange={e=>{setFigmaUrl(e.target.value);setImgBName('');}} placeholder='Link de Figma...'
-                    style={{width:'100%',background:'transparent',border:`1px solid ${figmaUrl?C.accent:C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'12px',outline:'none'}}/>
-                  {figmaUrl&&<p style={{fontSize:'10px',color:C.accent,marginTop:'3px'}}>✓ Figma conectado</p>}
-                </div>
-              </div>
+            {/* Diseños — A y B en paralelo */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'4px'}}>
+              <VarianteDesign label='Variante A' color={C.accent} imgName={imgAName} setImgName={setImgAName} figma={figmaUrlA} setFigma={setFigmaUrlA} refEl={imgRefA}/>
+              <VarianteDesign label='Variante B' color={C.green} imgName={imgBName} setImgName={setImgBName} figma={figmaUrl} setFigma={setFigmaUrl} refEl={imgRef}/>
             </div>
+            <p style={{...T.small,marginBottom:'0'}}>Sube capturas JPG/PNG o pega links de Figma. La IA interpretará los diseños para simular cómo reacciona cada arquetipo a cada variante.</p>
           </Card>
 
           {/* Métricas */}
@@ -1099,13 +1745,13 @@ Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"
 
           {errSim&&<p style={{color:C.red,fontSize:'12px',marginBottom:'8px'}}>⚠ {errSim}</p>}
           <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
-            <Btn variant='ghost' onClick={()=>setTsub(1)}>Atrás</Btn>
+            <Btn variant='ghost' onClick={()=>setTsub(2)}>Atrás</Btn>
             <Btn disabled={!hip||!varA||!varB} onClick={simular}>Simular →</Btn>
           </div>
         </div>
       )}
 
-      {tsub===3&&results&&(
+      {tsub===4&&results&&(
         <div>
           <div style={{background:'#0A1A14',border:`1px solid rgba(0,212,170,0.2)`,borderRadius:'12px',padding:'16px 18px',marginBottom:'16px',display:'flex',alignItems:'center',gap:'14px'}}>
             <span style={{fontSize:'24px'}}>🏆</span>
@@ -1122,7 +1768,7 @@ Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"
             <p style={{...T.label,marginBottom:'10px'}}>Resumen QA</p>
             {[
               {k:'URL testada',v:url},{k:'Variante A',v:varA},{k:'Variante B',v:varB},
-              {k:'Perfiles simulados',v:profiles.length},{k:'Métrica principal',v:metricaP},
+              {k:'Arquetipos generados',v:profiles.arquetipos.length},{k:'Sesiones simuladas',v:(profiles.total||0).toLocaleString()},{k:'Métrica principal',v:metricaP},
               {k:'Split',v:`A ${split}% / B ${100-split}%`},
             ].map(row=>(
               <div key={row.k} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px'}}>
@@ -1142,13 +1788,13 @@ Devuelve SOLO JSON: {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"
             </Card>
           )}
           <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
-            <Btn variant='ghost' onClick={()=>setTsub(2)}>Revisar</Btn>
-            <Btn variant='green' onClick={()=>setTsub(4)}>Lanzar test →</Btn>
+            <Btn variant='ghost' onClick={()=>setTsub(3)}>Revisar</Btn>
+            <Btn variant='green' onClick={()=>setTsub(5)}>Lanzar test →</Btn>
           </div>
         </div>
       )}
 
-      {tsub===4&&(
+      {tsub===5&&(
         <div>
           <Card style={{textAlign:'center',padding:'32px',marginBottom:'16px'}}>
             <div style={{fontSize:'40px',marginBottom:'12px'}}>✓</div>
