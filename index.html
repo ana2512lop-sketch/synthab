@@ -332,14 +332,19 @@ function ProjectDetail({project,onBack,onEdit,onNewTest,onViewTest,onViewReport}
         <Card>
           <p style={{...T.label,marginBottom:'12px'}}>Fuentes de datos cargadas</p>
           {[
-            {label:'Exp 1 — Quién es el usuario',done:project.exp1,req:true},
-            {label:'Exp 2 — Cómo llega',done:project.exp2,req:false},
-            {label:'Exp 3 — Cómo navega',done:project.exp3,req:false},
+            {label:'Exp 1 — Quién es el usuario',done:project.exp1,req:true,data:project.exp1Data},
+            {label:'Exp 2 — Cómo llega',done:project.exp2,req:false,data:project.exp2Data},
+            {label:'Exp 3 — Cómo navega',done:project.exp3,req:false,data:project.exp3Data},
           ].map(e=>(
-            <div key={e.label} style={{display:'flex',alignItems:'center',gap:'8px',padding:'7px 0',borderBottom:`1px solid ${C.border}`}}>
-              <span style={{fontSize:'13px',color:e.done?C.green:C.red}}>{e.done?'✓':'○'}</span>
-              <span style={{fontSize:'13px',color:e.done?C.txt:C.txtDim,flex:1}}>{e.label}</span>
-              {e.req&&<Tag color='purple'>Obligatorio</Tag>}
+            <div key={e.label} style={{padding:'7px 0',borderBottom:`1px solid ${C.border}`}}>
+              <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                <span style={{fontSize:'13px',color:e.done?C.green:C.red}}>{e.done?'✓':'○'}</span>
+                <span style={{fontSize:'13px',color:e.done?C.txt:C.txtDim,flex:1}}>{e.label}</span>
+                {e.req&&<Tag color='purple'>Obligatorio</Tag>}
+              </div>
+              {e.done&&e.data?.fileName&&(
+                <p style={{fontSize:'10px',color:C.txtDim,marginTop:'2px',paddingLeft:'21px'}}>📄 {e.data.fileName}</p>
+              )}
             </div>
           ))}
         </Card>
@@ -491,9 +496,9 @@ function CreateProject({onSave, onCancel, initial}){
   const [tablet,setTablet]=useState(initial?.kpis?.tablet||7);
 
   // Step 1 — Comportamiento
-  const [exp1,setExp1]=useState(null);
-  const [exp2,setExp2]=useState(null);
-  const [exp3,setExp3]=useState(null);
+  const [exp1,setExp1]=useState(initial?.exp1Data||null);
+  const [exp2,setExp2]=useState(initial?.exp2Data||null);
+  const [exp3,setExp3]=useState(initial?.exp3Data||null);
   const ref1=useRef(),ref2=useRef(),ref3=useRef();
 
   // Step 2 — Adquisición
@@ -537,6 +542,7 @@ function CreateProject({onSave, onCancel, initial}){
 
   function CSVBox({parsed,refEl,setter,label,hint,tutorial,required}){
     const [showTip,setShowTip]=useState(false);
+    const isSaved = parsed&&parsed.rows&&parsed.rows.length===0; // restored from save, no rows
     return(
       <div style={{marginBottom:'14px'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}}>
@@ -546,15 +552,42 @@ function CreateProject({onSave, onCancel, initial}){
           </button>
         </div>
         {showTip&&<div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px',marginBottom:'10px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>{tutorial}</div>}
-        <div onClick={()=>refEl.current.click()}
-          style={{border:`1.5px dashed ${parsed?C.green:C.border}`,borderRadius:'10px',padding:'16px',textAlign:'center',cursor:'pointer',background:parsed?C.greenDim:'#070713'}}>
-          <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter)}/>
-          <div style={{fontSize:'18px',marginBottom:'5px'}}>📊</div>
-          {parsed?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{parsed.fileName} · {parsed.rows.length} filas</p>
-            :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV o haz clic</p>}
-          <p style={{...T.small,marginTop:'3px'}}>{hint}</p>
-        </div>
-        {parsed&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>✓ Columnas: {parsed.headers.join(', ')}</div>}
+
+        {parsed?(
+          <div style={{border:`1.5px solid ${C.green}`,borderRadius:'10px',padding:'12px 14px',background:C.greenDim,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <span style={{fontSize:'20px'}}>✅</span>
+              <div>
+                <p style={{fontSize:'13px',fontWeight:600,color:C.green,marginBottom:'2px'}}>{parsed.fileName}</p>
+                <p style={{fontSize:'11px',color:C.txtDim}}>
+                  {isSaved?'Guardado — vuelve a subir para actualizar':`${parsed.rows.length} filas · ${parsed.headers?.length||0} columnas`}
+                </p>
+              </div>
+            </div>
+            <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+              <button onClick={()=>refEl.current.click()}
+                style={{fontSize:'11px',color:C.accent,background:'none',border:`1px solid ${C.accent}`,borderRadius:'6px',padding:'4px 10px',cursor:'pointer'}}>
+                Reemplazar
+              </button>
+              <button onClick={()=>setter(null)}
+                style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer'}}>✕</button>
+            </div>
+            <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter)}/>
+          </div>
+        ):(
+          <div onClick={()=>refEl.current.click()}
+            style={{border:`1.5px dashed ${C.border}`,borderRadius:'10px',padding:'16px',textAlign:'center',cursor:'pointer',background:'#070713'}}>
+            <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter)}/>
+            <div style={{fontSize:'18px',marginBottom:'5px'}}>📊</div>
+            <p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV o haz clic para subir</p>
+            <p style={{...T.small,marginTop:'3px'}}>{hint}</p>
+          </div>
+        )}
+        {parsed&&parsed.headers&&parsed.headers.length>0&&!isSaved&&(
+          <div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>
+            ✓ Columnas detectadas: {parsed.headers.join(', ')}
+          </div>
+        )}
       </div>
     );
   }
@@ -572,6 +605,9 @@ function CreateProject({onSave, onCancel, initial}){
       descripcion,negocioRespuestas,
       crm:{tipo:crmSeleccionado,csv:crmCsv?crmCsv.fileName:null},
       exp1:!!exp1,exp2:!!exp2,exp3:!!exp3,
+      exp1Data:exp1?{fileName:exp1.fileName,headers:exp1.headers,rows:[]}:null,
+      exp2Data:exp2?{fileName:exp2.fileName,headers:exp2.headers,rows:[]}:null,
+      exp3Data:exp3?{fileName:exp3.fileName,headers:exp3.headers,rows:[]}:null,
       tests:initial?.tests||[]
     });
   }
