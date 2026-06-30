@@ -582,9 +582,12 @@ function CreateProject({onSave, onCancel, initial}){
               </div>
             </div>
           </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
-            <Btn disabled={!name||!domain||!cvr||!sesiones||!ticket} onClick={()=>setSub(1)}>Siguiente →</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              <Btn disabled={!name||!domain||!cvr||!sesiones||!ticket} onClick={()=>setSub(1)}>Siguiente →</Btn>
+            </div>
           </div>
         </div>
       )}
@@ -628,9 +631,12 @@ function CreateProject({onSave, onCancel, initial}){
               tutorial={<span>1. GA4 → <b>Explorar → Exploración de rutas</b><br/>2. Nodo inicio: Página de destino<br/>3. Dimensiones: Título página · Nombre evento · Búsqueda interna<br/>4. Aplica segmentos: Por canal · Por dispositivo · Por conversores<br/>5. Exportar CSV</span>}
             />
           </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(0)}>Atrás</Btn>
-            <Btn disabled={!exp1} onClick={()=>setSub(2)}>Siguiente →</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              <Btn disabled={!exp1} onClick={()=>setSub(2)}>Siguiente →</Btn>
+            </div>
           </div>
         </div>
       )}
@@ -670,9 +676,12 @@ function CreateProject({onSave, onCancel, initial}){
               {CANALES_LIST.map(ch=><option key={ch}>{ch}</option>)}
             </select>
           </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(1)}>Atrás</Btn>
-            <Btn onClick={()=>setSub(3)}>Siguiente →</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              <Btn onClick={()=>setSub(3)}>Siguiente →</Btn>
+            </div>
           </div>
         </div>
       )}
@@ -707,9 +716,12 @@ function CreateProject({onSave, onCancel, initial}){
             </div>
             <Input label='Describe los pasos del funnel (opcional)' value={pasosFunnel} onChange={setPasosFunnel} placeholder='Ej: Homepage → Categoría → Ficha → Carrito → Checkout → Confirmación'/>
           </Card>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(2)}>Atrás</Btn>
-            <Btn onClick={()=>setSub(4)}>Siguiente →</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              <Btn onClick={()=>setSub(4)}>Siguiente →</Btn>
+            </div>
           </div>
         </div>
       )}
