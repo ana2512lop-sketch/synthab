@@ -391,7 +391,79 @@ function ProjectDetail({project,onBack,onEdit,onNewTest,onViewTest,onViewReport}
 
 // ── CREATE PROJECT ────────────────────────────────────────────────────────
 const SECTORES=[{value:'moda',label:'Moda'},{value:'hogar',label:'Hogar'},{value:'electronica',label:'Electrónica'},{value:'belleza',label:'Belleza'},{value:'alimentacion',label:'Alimentación'},{value:'deporte',label:'Deporte'},{value:'turismo',label:'Turismo'},{value:'servicios',label:'Servicios / SaaS'}];
-const CANALES_LIST=['Orgánico / SEO','Google Ads','Meta Ads','Email / Newsletter','Directo','Social orgánico','TikTok Ads','Afiliados'];
+const CANALES_LIST=[
+  // Búsqueda
+  'Orgánico / SEO',
+  'Paid Search / SEM (Google Ads)',
+  'Paid Search / SEM (Bing Ads)',
+  'Tráfico de IA (ChatGPT, Perplexity, Gemini...)',
+  // Shopping
+  'Paid Shopping (Google Shopping)',
+  'Marketplace (Amazon, El Corte Inglés...)',
+  // Social pagado
+  'Paid Social (Meta Ads)',
+  'Paid Social (TikTok Ads)',
+  'Paid Social (LinkedIn Ads)',
+  'Paid Social (Pinterest Ads)',
+  'Paid Social (X / Twitter Ads)',
+  'Paid Social (YouTube Ads)',
+  // Social orgánico
+  'Social orgánico (Instagram)',
+  'Social orgánico (TikTok)',
+  'Social orgánico (LinkedIn)',
+  'Social orgánico (YouTube)',
+  'Social orgánico (Pinterest)',
+  'Social orgánico (X / Twitter)',
+  // Email y CRM
+  'Email / Newsletter',
+  'Email transaccional',
+  'SMS / WhatsApp',
+  'Push notifications',
+  // Referral y afiliados
+  'Referral (webs externas)',
+  'Afiliados',
+  'Influencers / Colaboraciones',
+  'Prensa / PR',
+  // Directo y otros
+  'Directo',
+  'Display / Programática',
+  'Retargeting / Remarketing',
+  'QR / Offline',
+];
+
+// Descripción de cada canal para el prompt de IA
+const CANAL_CONTEXTO={
+  'Orgánico / SEO': 'Usuario llega buscando activamente en Google. Alta intención informacional o transaccional. Motivación: encontrar la mejor solución. Nivel consciencia 2-4. Comparará antes de comprar.',
+  'Paid Search / SEM (Google Ads)': 'Usuario buscó una keyword específica y clicó un anuncio. Intención de compra alta. Nivel consciencia 3-5. Está comparando opciones activamente. Sensible al precio y a la propuesta de valor inmediata.',
+  'Paid Search / SEM (Bing Ads)': 'Similar a Google Ads pero perfil ligeramente más mayor y desktop. Menor competencia, usuarios más deliberados. Nivel consciencia 3-5.',
+  'Tráfico de IA (ChatGPT, Perplexity, Gemini...)': 'Usuario pidió recomendación a una IA y fue dirigido. Altamente informado, ha recibido contexto previo. Nivel consciencia 3-4. Busca validación de lo que ya le dijo la IA. Analítico, compara datos.',
+  'Paid Shopping (Google Shopping)': 'Usuario vio el producto con precio en los resultados de búsqueda y clicó. Intención de compra muy alta. Nivel consciencia 4-5. Ya comparó precio visualmente. Muy sensible al precio y las fotos del producto.',
+  'Marketplace (Amazon, El Corte Inglés...)': 'Llega de un marketplace con intención de compra alta. Acostumbrado a comprar online. Compara precios y reviews. Nivel consciencia 4-5. Exige confianza y proceso de compra simple.',
+  'Paid Social (Meta Ads)': 'Usuario impactado por anuncio en Facebook o Instagram mientras navegaba. Intención baja-media, no estaba buscando. Nivel consciencia 1-3. Compra más emocional e impulsiva. Muy visual. Sensible a urgencia y prueba social.',
+  'Paid Social (TikTok Ads)': 'Perfil joven, impacto visual en vídeo corto. Decisión muy emocional e impulsiva. Nivel consciencia 1-2. Necesita CTA directo e inmediato. Muy sensible a tendencias y autenticidad.',
+  'Paid Social (LinkedIn Ads)': 'Contexto profesional B2B. Usuario con cargo decisor o influenciador. Nivel consciencia 2-4. Busca ROI, casos de éxito y credibilidad. Ciclo de compra largo. Necesita argumentos racionales.',
+  'Paid Social (Pinterest Ads)': 'Usuario en fase de inspiración y planificación. Nivel consciencia 1-3. Muy visual. Perfil mayoritariamente femenino. Compra reflexiva, guarda para más tarde. Útil para hogar, moda, recetas, viajes.',
+  'Paid Social (X / Twitter Ads)': 'Perfil variado, más urbano y digitalizado. Nivel consciencia 2-3. Decisiones rápidas pero informadas. Sensible a opinión de terceros y tendencias del momento.',
+  'Paid Social (YouTube Ads)': 'Usuario impactado antes o durante un vídeo. Nivel consciencia 1-3. Ha consumido contenido relacionado. Mayor capacidad de atención que otros social. Sensible a storytelling y demostración de producto.',
+  'Social orgánico (Instagram)': 'Viene por contenido de la marca, influencer o búsqueda interna. Nivel consciencia 2-4. Muy visual, inspiracional. Perfil joven-adulto. Compra mixta impulsiva y reflexiva.',
+  'Social orgánico (TikTok)': 'Descubrimiento por vídeo viral o tendencia. Nivel consciencia 1-2. Muy impulsivo. Perfil joven. Necesita proceso de compra muy simple y rápido.',
+  'Social orgánico (LinkedIn)': 'B2B. Viene por contenido de valor, artículo o recomendación profesional. Nivel consciencia 3-4. Analítico, busca profundidad y credibilidad.',
+  'Social orgánico (YouTube)': 'Ha visto contenido de la marca o reseña. Nivel consciencia 3-4. Muy informado. Compara antes de comprar. Confía en la marca si el contenido aportó valor.',
+  'Social orgánico (Pinterest)': 'Fase de inspiración o planificación. Nivel consciencia 2-3. Reflexivo. Guarda y vuelve. Ciclo de compra más largo.',
+  'Social orgánico (X / Twitter)': 'Viene por conversación, trending topic o recomendación. Nivel consciencia 2-3. Digitalizado e informado.',
+  'Email / Newsletter': 'Usuario ya en la BBDD, relación previa con la marca. Nivel consciencia 4-5. Alta intención. Recurrente. Responde bien a ofertas exclusivas, novedades y contenido personalizado.',
+  'Email transaccional': 'Viene de un email relacionado con una compra o acción previa. Intención muy alta y específica. Nivel consciencia 5. Busca confirmar, completar o repetir una acción concreta.',
+  'SMS / WhatsApp': 'Canal muy directo, alta tasa de apertura. Nivel consciencia 4-5. Usuario ya tiene relación con la marca. Muy sensible a la relevancia y personalización. Intrusivo si el mensaje no es pertinente.',
+  'Push notifications': 'Usuario con app instalada o suscripción web. Nivel consciencia 3-5. Necesita mensaje muy concreto y accionable. Alta sensibilidad al contenido: si no es relevante, desuscribe.',
+  'Referral (webs externas)': 'Viene recomendado por otra web, blog o medio. Llega con cierta confianza previa. Nivel consciencia 3-4. Más propenso a explorar y confiar en la marca.',
+  'Afiliados': 'Similar a referral pero con intención de compra más alta. Nivel consciencia 4-5. El afiliado ya le ha pre-vendido. Sensible al precio y a las condiciones de la oferta.',
+  'Influencers / Colaboraciones': 'Viene por recomendación de un creador de confianza. Nivel consciencia 2-4. Alta influencia social, confía en la recomendación. Más impulsivo que el orgánico. Sensible a códigos de descuento.',
+  'Prensa / PR': 'Viene de un artículo, reportaje o mención en medio. Nivel consciencia 2-3. Busca validar lo que leyó. Analítico. Espera que la marca esté a la altura de lo publicado.',
+  'Directo': 'Escribe la URL directamente o viene de favoritos. Ya conoce la marca. Nivel consciencia 4-5. Recurrente o con intención muy clara. Proceso de compra corto.',
+  'Display / Programática': 'Impacto pasivo mientras navegaba en otras webs. Nivel consciencia 1-2. Baja intención inicial. Necesita mensajes de awareness o retargeting para activarse.',
+  'Retargeting / Remarketing': 'Ya visitó la web antes y no convirtió. Nivel consciencia 4. Conoce la marca. Puede haber tenido objeción de precio, confianza o timing. Responde bien a urgencia, descuento o eliminación de fricción.',
+  'QR / Offline': 'Viene del mundo físico: cartel, folleto, tienda, evento. Nivel consciencia 2-4 según contexto. Motivación concreta relacionada con el punto de contacto físico. Puede ser primera visita digital a la marca.',
+};
 
 function CreateProject({onSave, onCancel, initial}){
   const STEPS=[
@@ -655,7 +727,50 @@ function CreateProject({onSave, onCancel, initial}){
                 <select value={c.canal} onChange={e=>{const n=[...canales];n[i]={...n[i],canal:e.target.value};setCanales(n);}}
                   style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:c.canal?C.txt:C.txtDim,fontSize:'13px',outline:'none'}}>
                   <option value=''>Seleccionar canal...</option>
-                  {CANALES_LIST.map(ch=><option key={ch}>{ch}</option>)}
+                  <optgroup label='— Búsqueda'>
+                    <option>Orgánico / SEO</option>
+                    <option>Paid Search / SEM (Google Ads)</option>
+                    <option>Paid Search / SEM (Bing Ads)</option>
+                    <option>Tráfico de IA (ChatGPT, Perplexity, Gemini...)</option>
+                  </optgroup>
+                  <optgroup label='— Shopping'>
+                    <option>Paid Shopping (Google Shopping)</option>
+                    <option>Marketplace (Amazon, El Corte Inglés...)</option>
+                  </optgroup>
+                  <optgroup label='— Social pagado'>
+                    <option>Paid Social (Meta Ads)</option>
+                    <option>Paid Social (TikTok Ads)</option>
+                    <option>Paid Social (LinkedIn Ads)</option>
+                    <option>Paid Social (Pinterest Ads)</option>
+                    <option>Paid Social (YouTube Ads)</option>
+                    <option>Paid Social (X / Twitter Ads)</option>
+                  </optgroup>
+                  <optgroup label='— Social orgánico'>
+                    <option>Social orgánico (Instagram)</option>
+                    <option>Social orgánico (TikTok)</option>
+                    <option>Social orgánico (LinkedIn)</option>
+                    <option>Social orgánico (YouTube)</option>
+                    <option>Social orgánico (Pinterest)</option>
+                    <option>Social orgánico (X / Twitter)</option>
+                  </optgroup>
+                  <optgroup label='— Email y CRM'>
+                    <option>Email / Newsletter</option>
+                    <option>Email transaccional</option>
+                    <option>SMS / WhatsApp</option>
+                    <option>Push notifications</option>
+                  </optgroup>
+                  <optgroup label='— Referral y afiliados'>
+                    <option>Referral (webs externas)</option>
+                    <option>Afiliados</option>
+                    <option>Influencers / Colaboraciones</option>
+                    <option>Prensa / PR</option>
+                  </optgroup>
+                  <optgroup label='— Otros'>
+                    <option>Directo</option>
+                    <option>Display / Programática</option>
+                    <option>Retargeting / Remarketing</option>
+                    <option>QR / Offline</option>
+                  </optgroup>
                 </select>
                 <input type='number' placeholder='%' value={c.pct} onChange={e=>{const n=[...canales];n[i]={...n[i],pct:e.target.value};setCanales(n);}}
                   style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 10px',color:C.txt,fontSize:'13px',outline:'none',textAlign:'center'}}/>
@@ -673,7 +788,50 @@ function CreateProject({onSave, onCancel, initial}){
             <select value={canalConversion} onChange={e=>setCanalConversion(e.target.value)}
               style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
               <option value=''>No lo sé</option>
-              {CANALES_LIST.map(ch=><option key={ch}>{ch}</option>)}
+              <optgroup label='— Búsqueda'>
+                <option>Orgánico / SEO</option>
+                <option>Paid Search / SEM (Google Ads)</option>
+                <option>Paid Search / SEM (Bing Ads)</option>
+                <option>Tráfico de IA (ChatGPT, Perplexity, Gemini...)</option>
+              </optgroup>
+              <optgroup label='— Shopping'>
+                <option>Paid Shopping (Google Shopping)</option>
+                <option>Marketplace (Amazon, El Corte Inglés...)</option>
+              </optgroup>
+              <optgroup label='— Social pagado'>
+                <option>Paid Social (Meta Ads)</option>
+                <option>Paid Social (TikTok Ads)</option>
+                <option>Paid Social (LinkedIn Ads)</option>
+                <option>Paid Social (Pinterest Ads)</option>
+                <option>Paid Social (YouTube Ads)</option>
+                <option>Paid Social (X / Twitter Ads)</option>
+              </optgroup>
+              <optgroup label='— Social orgánico'>
+                <option>Social orgánico (Instagram)</option>
+                <option>Social orgánico (TikTok)</option>
+                <option>Social orgánico (LinkedIn)</option>
+                <option>Social orgánico (YouTube)</option>
+                <option>Social orgánico (Pinterest)</option>
+                <option>Social orgánico (X / Twitter)</option>
+              </optgroup>
+              <optgroup label='— Email y CRM'>
+                <option>Email / Newsletter</option>
+                <option>Email transaccional</option>
+                <option>SMS / WhatsApp</option>
+                <option>Push notifications</option>
+              </optgroup>
+              <optgroup label='— Referral y afiliados'>
+                <option>Referral (webs externas)</option>
+                <option>Afiliados</option>
+                <option>Influencers / Colaboraciones</option>
+                <option>Prensa / PR</option>
+              </optgroup>
+              <optgroup label='— Otros'>
+                <option>Directo</option>
+                <option>Display / Programática</option>
+                <option>Retargeting / Remarketing</option>
+                <option>QR / Offline</option>
+              </optgroup>
             </select>
           </Card>
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
@@ -1290,13 +1448,17 @@ Arquetipos CRO universales: esceptico, cazador_precio, impulsivo, analitico, per
 Para ecommerce añade: recurrente, primerizo, movil, escritorio, regalo
 Para lead gen / SaaS añade: investigador, comparador, decidido
 
+CONTEXTO DE CANALES (usa esto para determinar nivel_consciencia, motivacion y comportamiento según el canal de cada perfil):
+${JSON.stringify(CANAL_CONTEXTO)}
+
 REGLAS:
 - Distribuye los ${n} perfiles entre los tipos más representativos del sector
 - prob_conversion anclado al CVR real del segmento
-- nivel_consciencia (1-5) coherente con tipo: impulsivo=4-5, investigador=2-3, perdido=1-2
+- nivel_consciencia (1-5) determinado por el canal de entrada según el contexto de canales arriba
 - urgencia coherente con fase_funnel y tipo
 - objeciones y motivadores específicos para ${project.sector}
-- comportamiento digital coherente con edad y nivel_digital
+- comportamiento digital coherente con edad, nivel_digital y canal
+- canal_entrada determina fase_funnel: Paid Social → descubrimiento, Email → decisión, Retargeting → consideración avanzada, Directo → decisión
 
 Devuelve SOLO array JSON. Cada perfil DEBE tener todos estos campos:
 {
