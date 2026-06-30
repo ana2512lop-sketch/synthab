@@ -509,9 +509,7 @@ function CreateProject({onSave, onCancel, initial}){
 
   // Step 4 — Negocio
   const [descripcion,setDescripcion]=useState(initial?.descripcion||'');
-  const [clientesActivos,setClientesActivos]=useState(initial?.clientesActivos||'');
-  const [ltvMedio,setLtvMedio]=useState(initial?.ltvMedio||'');
-  const [frecuenciaCompra,setFrecuenciaCompra]=useState(initial?.frecuenciaCompra||'');
+  const [negocioRespuestas,setNegocioRespuestas]=useState(initial?.negocioRespuestas||{});
 
   // Step 5 — CRM
   const [crmSeleccionado,setCrmSeleccionado]=useState(initial?.crm?.tipo||null);
@@ -571,7 +569,7 @@ function CreateProject({onSave, onCancel, initial}){
       canales:canales.filter(c=>c.canal),
       canalConversion,
       abandonoPrincipal,pasosFunnel,
-      descripcion,clientesActivos,ltvMedio,frecuenciaCompra,
+      descripcion,negocioRespuestas,
       crm:{tipo:crmSeleccionado,csv:crmCsv?crmCsv.fileName:null},
       exp1:!!exp1,exp2:!!exp2,exp3:!!exp3,
       tests:initial?.tests||[]
@@ -887,78 +885,84 @@ function CreateProject({onSave, onCancel, initial}){
       {/* STEP 4 — Negocio */}
       {sub===4&&(
         <div>
-          <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'14px'}}>Datos de negocio</p>
-            <div style={{marginBottom:'12px'}}>
-              <label style={{...T.label,display:'block',marginBottom:'5px'}}>Descripción del negocio</label>
-              <textarea value={descripcion} onChange={e=>setDescripcion(e.target.value)} placeholder='Ej: Ecommerce de moda urbana dirigido a 25-40 años, ticket medio 68€, con fuerte presencia en Instagram...'
-                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',resize:'vertical',minHeight:'70px'}}/>
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px'}}>
-              <Input label='Clientes activos' value={clientesActivos} onChange={setClientesActivos} placeholder='Ej: 12.000'/>
-              <Input label='LTV medio (€)' value={ltvMedio} onChange={setLtvMedio} placeholder='Ej: 240€'/>
-              <div>
-                <label style={{...T.label,display:'block',marginBottom:'5px'}}>Frecuencia de compra</label>
-                <select value={frecuenciaCompra} onChange={e=>setFrecuenciaCompra(e.target.value)}
-                  style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
-                  <option value=''>No sé</option>
-                  <option>Una vez al año</option>
-                  <option>2-3 veces al año</option>
-                  <option>Mensual</option>
-                  <option>Semanal o más</option>
-                </select>
-              </div>
-            </div>
+          <Card style={{marginBottom:'10px'}}>
+            <p style={{...T.h3,marginBottom:'8px'}}>Descripción del negocio</p>
+            <textarea value={descripcion} onChange={e=>setDescripcion(e.target.value)}
+              placeholder='Ej: Ecommerce de moda urbana dirigido a mujeres 25-40 años, con fuerte presencia en Instagram...'
+              style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',resize:'vertical',minHeight:'60px'}}/>
+            <p style={{...T.small,marginTop:'5px'}}>Cuanta más info des aquí, más contexto tendrá la IA para construir perfiles realistas.</p>
           </Card>
 
+          {[
+            {id:'producto',icon:'🛍️',label:'Producto y precio',preguntas:[
+              {id:'productoEstrella',label:'¿Cuál es tu producto o categoría estrella?',tipo:'texto',placeholder:'Ej: Vestidos de verano, zapatillas urbanas...'},
+              {id:'motivoDev',label:'¿Cuál es el principal motivo de devolución?',tipo:'texto',placeholder:'Ej: Talla incorrecta, no era como en la foto...'},
+              {id:'estacionalidad',label:'¿Tienes estacionalidad marcada? ¿Cuándo son tus picos?',tipo:'texto',placeholder:'Ej: Picos en enero (rebajas) y junio (verano)'},
+              {id:'precioFreno',label:'¿El precio es un freno frecuente para el cliente?',tipo:'sino'},
+            ]},
+            {id:'envio',icon:'📦',label:'Envío y logística',preguntas:[
+              {id:'envioGratis',label:'¿Ofreces envío gratuito?',tipo:'sino'},
+              {id:'envioCondicion',label:'¿Con qué condición?',tipo:'texto',placeholder:'Ej: Gratis a partir de 50€'},
+              {id:'envioQueja',label:'¿El coste de envío es una queja frecuente?',tipo:'sino'},
+              {id:'plazoEntrega',label:'¿Cuánto tarda en llegar un pedido?',tipo:'texto',placeholder:'Ej: 2-4 días hábiles en Península'},
+              {id:'recogidaTienda',label:'¿Tienen opción de recogida en tienda?',tipo:'sino'},
+            ]},
+            {id:'fidelizacion',icon:'⭐',label:'Fidelización y recurrencia',preguntas:[
+              {id:'programaPuntos',label:'¿Tienes programa de puntos o fidelización?',tipo:'sino'},
+              {id:'descuentoRecurrente',label:'¿Haces descuentos especiales a clientes recurrentes?',tipo:'sino'},
+              {id:'tiempoSegundaCompra',label:'¿Cuánto tarda en producirse la segunda compra de media?',tipo:'texto',placeholder:'Ej: Entre 2 y 4 meses'},
+              {id:'clientesVip',label:'¿Tienes clientes VIP o segmento premium?',tipo:'sino'},
+              {id:'pctRecurrencia',label:'¿Qué % de clientes repite compra aproximadamente?',tipo:'texto',placeholder:'Ej: Alrededor del 30% vuelve en 6 meses'},
+            ]},
+            {id:'marketing',icon:'📣',label:'Comunicación y marketing',preguntas:[
+              {id:'hacenEmail',label:'¿Hacéis campañas de email?',tipo:'sino'},
+              {id:'frecuenciaEmail',label:'¿Con qué frecuencia?',tipo:'texto',placeholder:'Ej: 2 emails semanales + newsletter mensual'},
+              {id:'automatizaciones',label:'¿Tenéis automatizaciones activas? (carrito abandonado, bienvenida...)',tipo:'sino'},
+              {id:'queAutomatizaciones',label:'¿Cuáles?',tipo:'texto',placeholder:'Ej: Carrito abandonado a las 2h y 24h, email bienvenida con descuento'},
+              {id:'smsWhatsapp',label:'¿Usáis SMS o WhatsApp para comunicaros con clientes?',tipo:'sino'},
+              {id:'influencers',label:'¿Trabajáis con influencers o afiliados?',tipo:'sino'},
+            ]},
+            {id:'fisica',icon:'🏪',label:'Presencia física y omnicanal',preguntas:[
+              {id:'tiendaFisica',label:'¿Tenéis tienda física además del ecommerce?',tipo:'sino'},
+              {id:'clientesCruzados',label:'¿Los clientes de tienda también compran online?',tipo:'sino'},
+              {id:'marketplaces',label:'¿Vendéis en marketplaces? (Amazon, Zalando...)',tipo:'sino'},
+              {id:'queMarketplaces',label:'¿Cuáles?',tipo:'texto',placeholder:'Ej: Amazon y Zalando con stock limitado'},
+            ]},
+            {id:'fricciones',icon:'💬',label:'Dudas y fricciones frecuentes',preguntas:[
+              {id:'quejaFrecuente',label:'¿Cuál es la queja o duda más frecuente del cliente?',tipo:'texto',placeholder:'Ej: Dudas sobre tallas, retrasos en temporada alta...'},
+              {id:'puntoContacto',label:'¿En qué punto del proceso contactan más con atención al cliente?',tipo:'texto',placeholder:'Ej: Después de comprar para saber el estado del pedido'},
+              {id:'tieneChat',label:'¿Tienes chat en la web?',tipo:'sino'},
+              {id:'tipoChat',label:'¿De qué tipo?',tipo:'texto',placeholder:'Ej: Chatbot IA + agente humano en horario laboral'},
+            ]},
+          ].map(bloque=>(
+            <BloqueNegocio key={bloque.id} bloque={bloque}
+              valores={negocioRespuestas}
+              onChange={(id,val)=>setNegocioRespuestas(prev=>({...prev,[id]:val}))}/>
+          ))}
+
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'4px'}}>CRM / MarTech <Tag color='amber'>Opcional</Tag></p>
-            <p style={{...T.body,marginBottom:'14px'}}>Conecta la fuente de datos del cliente para enriquecer los perfiles con comportamiento real de BBDD.</p>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px',marginBottom:'12px'}}>
-              {[
-                {id:'salesforce',label:'Salesforce',desc:'Sales Cloud, Marketing Cloud, Commerce Cloud',icon:'☁️',tag:'API'},
-                {id:'sap',label:'SAP',desc:'SAP Commerce, Customer Experience, Analytics',icon:'🔷',tag:'API'},
-                {id:'adobe',label:'Adobe Experience',desc:'Marketo, Analytics, Target, Commerce',icon:'🔴',tag:'API'},
-                {id:'csv',label:'Importar BBDD',desc:'CSV o Excel exportado de cualquier herramienta',icon:'📊',tag:'CSV/XLS'},
-                {id:'otro',label:'Otro conector',desc:'HubSpot, Klaviyo, Mailchimp, custom endpoint',icon:'🔌',tag:'API'},
-              ].map(crm=>(
-                <div key={crm.id} onClick={()=>setCrmSeleccionado(crmSeleccionado===crm.id?null:crm.id)}
-                  style={{padding:'12px',borderRadius:'10px',border:`1px solid ${crmSeleccionado===crm.id?C.accent:C.border}`,background:crmSeleccionado===crm.id?C.accentDim:'#070713',cursor:'pointer',position:'relative'}}>
-                  <div style={{position:'absolute',top:'7px',right:'7px',fontSize:'9px',fontWeight:700,padding:'1px 6px',borderRadius:'10px',background:crm.tag==='API'?C.accentDim:C.greenDim,color:crm.tag==='API'?C.accent:C.green}}>{crm.tag}</div>
-                  <div style={{fontSize:'20px',marginBottom:'5px'}}>{crm.icon}</div>
-                  <p style={{fontSize:'12px',fontWeight:600,color:crmSeleccionado===crm.id?C.accent:C.txt,marginBottom:'2px'}}>{crm.label}</p>
-                  <p style={{fontSize:'10px',color:C.txtDim,lineHeight:'1.5'}}>{crm.desc}</p>
-                </div>
-              ))}
+            <p style={{...T.h3,marginBottom:'4px'}}>Datos de BBDD / CRM <Tag color='amber'>Opcional</Tag></p>
+            <p style={{...T.body,marginBottom:'10px'}}>Sube un CSV exportado de tu CRM con datos agregados y anonimizados. No necesitamos emails ni nombres — solo patrones de comportamiento.</p>
+            <div style={{background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'8px',padding:'9px 12px',marginBottom:'12px',fontSize:'11px',color:C.green}}>
+              🔒 Solo datos agregados — sin emails, sin nombres, sin datos personales. Compatible con GDPR.
             </div>
-
-            {crmSeleccionado==='csv'&&(
-              <div>
-                <p style={{...T.label,marginBottom:'8px'}}>Subir CSV / Excel de BBDD</p>
-                <div onClick={()=>refCrm.current.click()}
-                  style={{border:`1.5px dashed ${crmCsv?C.green:C.border}`,borderRadius:'10px',padding:'16px',textAlign:'center',cursor:'pointer',background:crmCsv?C.greenDim:'#070713'}}>
-                  <input ref={refCrm} type='file' accept='.csv,.xlsx,.xls,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setCrmCsv)}/>
-                  <div style={{fontSize:'18px',marginBottom:'5px'}}>📁</div>
-                  {crmCsv?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{crmCsv.fileName} · {crmCsv.rows?.length||0} filas</p>
-                    :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV/Excel o haz clic</p>}
-                  <p style={{...T.small,marginTop:'3px'}}>Columnas recomendadas: cliente_id, ticket_medio, frecuencia_compra, segmento, ltv, fecha_ultima_compra</p>
-                </div>
-                {crmCsv&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>✓ Columnas: {crmCsv.headers?.join(', ')}</div>}
-              </div>
-            )}
-
-            {crmSeleccionado&&crmSeleccionado!=='csv'&&(
-              <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
-                <p style={{color:C.amber,fontWeight:600,marginBottom:'4px'}}>🔌 Integración API — próximamente</p>
-                <p>La conexión directa con {crmSeleccionado==='salesforce'?'Salesforce':crmSeleccionado==='sap'?'SAP':crmSeleccionado==='adobe'?'Adobe Experience':'esta plataforma'} estará disponible en la siguiente versión.</p>
-                <button onClick={()=>setCrmSeleccionado('csv')} style={{marginTop:'7px',fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>Usar importación CSV mientras tanto →</button>
-              </div>
-            )}
+            <div onClick={()=>refCrm.current.click()}
+              style={{border:`1.5px dashed ${crmCsv?C.green:C.border}`,borderRadius:'10px',padding:'16px',textAlign:'center',cursor:'pointer',background:crmCsv?C.greenDim:'#070713'}}>
+              <input ref={refCrm} type='file' accept='.csv,.xlsx,.xls,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setCrmCsv)}/>
+              <div style={{fontSize:'20px',marginBottom:'5px'}}>📁</div>
+              {crmCsv?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{crmCsv.fileName} · {crmCsv.rows?.length||0} filas</p>
+                :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV/Excel o haz clic para subir</p>}
+              <p style={{...T.small,marginTop:'4px'}}>Columnas recomendadas: segmento, ticket_medio, frecuencia_compra, ltv, canal_origen, fecha_ultima_compra</p>
+            </div>
+            {crmCsv&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>✓ Columnas detectadas: {crmCsv.headers?.join(', ')}</div>}
           </Card>
 
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(3)}>Atrás</Btn>
-            <Btn variant='green' onClick={handleSave}>{isEdit?'Guardar cambios':'Crear proyecto'} ({score()}% precisión)</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              <Btn variant='green' onClick={handleSave}>{isEdit?'Guardar cambios':'Crear proyecto'} ({score()}% precisión)</Btn>
+            </div>
           </div>
         </div>
       )}
@@ -1170,6 +1174,50 @@ function ProfileGrid({profiles, sector}){
       </div>
       {selected&&<ProfileModal profile={selected.p} idx={selected.i} onClose={()=>setSelected(null)}/>}
     </>
+  );
+}
+
+function BloqueNegocio({bloque, valores, onChange}){
+  const [open,setOpen]=useState(false);
+  const respondidas = bloque.preguntas.filter(p=>valores[p.id]&&valores[p.id]!=='').length;
+  return(
+    <div style={{marginBottom:'8px',borderRadius:'10px',border:`1px solid ${open?C.accent:C.border}`,overflow:'hidden',transition:'border-color 0.2s'}}>
+      <div onClick={()=>setOpen(!open)}
+        style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 14px',cursor:'pointer',background:open?C.accentDim:'#070713'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+          <span style={{fontSize:'18px'}}>{bloque.icon}</span>
+          <span style={{fontSize:'13px',fontWeight:600,color:open?C.accent:C.txt}}>{bloque.label}</span>
+          {respondidas>0&&<span style={{fontSize:'10px',background:C.green,color:'#000',padding:'1px 7px',borderRadius:'10px',fontWeight:700}}>{respondidas} resp.</span>}
+        </div>
+        <span style={{fontSize:'12px',color:C.txtDim,transition:'transform 0.2s',display:'inline-block',transform:open?'rotate(180deg)':'rotate(0deg)'}}>▾</span>
+      </div>
+      {open&&(
+        <div style={{padding:'14px',background:'#050510',display:'flex',flexDirection:'column',gap:'12px'}}>
+          {bloque.preguntas.map(p=>(
+            <div key={p.id}>
+              <label style={{...T.label,display:'block',marginBottom:'6px'}}>{p.label}</label>
+              {p.tipo==='sino'?(
+                <div style={{display:'flex',gap:'8px'}}>
+                  {['Sí','No','No sé'].map(op=>(
+                    <button key={op} onClick={()=>onChange(p.id,valores[p.id]===op?'':op)}
+                      style={{padding:'6px 16px',borderRadius:'20px',fontSize:'12px',fontWeight:600,cursor:'pointer',
+                        background:valores[p.id]===op?(op==='Sí'?C.greenDim:op==='No'?'rgba(255,80,80,0.15)':C.accentDim):'transparent',
+                        border:`1px solid ${valores[p.id]===op?(op==='Sí'?C.green:op==='No'?'#FF5050':C.accent):C.border}`,
+                        color:valores[p.id]===op?(op==='Sí'?C.green:op==='No'?'#FF8080':C.accent):C.txtDim}}>
+                      {op}
+                    </button>
+                  ))}
+                </div>
+              ):(
+                <input value={valores[p.id]||''} onChange={e=>onChange(p.id,e.target.value)}
+                  placeholder={p.placeholder}
+                  style={{width:'100%',background:'#070713',border:`1px solid ${valores[p.id]?C.accent:C.border}`,borderRadius:'8px',padding:'8px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
