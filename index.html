@@ -295,8 +295,59 @@ function ProjectsList({projects,onSelect,onCreate}){
 }
 
 // ── PROJECT DETAIL ────────────────────────────────────────────────────────
-function ProjectDetail({project,onBack,onEdit,onNewTest,onViewTest,onViewReport}){
+const ARQUETIPOS_BASE=[
+  {n:'El decidido',need:'Rapidez y cero fricción.',consciencia:'4-5',senales:'Usa el buscador, pocas páginas, PDP → carrito rápido.',rec:'CTA directo y visible, checkout en el menor número de pasos posible.'},
+  {n:'El explorador',need:'Descubrimiento y orientación.',consciencia:'2-3',senales:'Muchas PLP/PDP, filtros, scroll, sesiones largas.',rec:'Buenos filtros, recomendaciones relevantes, contenido inspiracional.'},
+  {n:'El comparador',need:'Comparativas y argumentos diferenciales.',consciencia:'3-4',senales:'Vuelve a PDP, abre productos similares, consulta características.',rec:'Tablas comparativas, specs claras, reviews visibles.'},
+  {n:'El desconfiado',need:'Confianza y reducción de riesgo.',consciencia:'3',senales:'Consulta envíos, devoluciones, opiniones, FAQ, condiciones.',rec:'Sellos de confianza, política de devolución visible, reviews destacadas.'},
+  {n:'El sensible al precio',need:'Precio, descuentos y percepción de valor.',consciencia:'3-4',senales:'Ordena por precio, promociones, cupones, abandona carrito.',rec:'Mostrar ahorro, comparativa de precio, urgencia razonable sin presionar.'},
+  {n:'El indeciso',need:'Ayuda para decidir.',consciencia:'2-3',senales:'Backtracking, múltiples PDP, carrito sin compra.',rec:'Guías de ayuda a la compra, chat proactivo, simplificar opciones.'},
+  {n:'El frustrado',need:'Eliminar fricciones UX.',consciencia:'variable — la fricción frena la intención, no la anula',senales:'Rage clicks, dead clicks, errores, repetición de acciones.',rec:'Revisar los puntos exactos de rage click, simplificar formularios.'},
+  {n:'El investigador',need:'Información y profundidad.',consciencia:'2-3',senales:'Scroll alto, fichas técnicas, FAQ, contenido, sesiones largas.',rec:'Contenido educativo, FAQ extensa, especificaciones detalladas.'},
+  {n:'El recurrente',need:'Eficiencia y personalización.',consciencia:'4-5',senales:'Acceso directo, login, recompra, rutas cortas.',rec:'Recompra en un clic, personalización, programa de fidelización.'},
+  {n:'El abandonador de checkout',need:'Identificar fricción final.',consciencia:'4-5 — intención alta, algo puntual lo frena',senales:'Add-to-cart + checkout sin purchase.',rec:'Email de recuperación de carrito, mostrar costes totales antes, checkout más corto.'},
+];
+
+function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,onViewTest,onViewReport}){
   const statusColor={completado:'green',enCurso:'amber','en curso':'amber',borrador:'default'};
+  const [openArch,setOpenArch]=useState(null);
+  const [genArch,setGenArch]=useState(false);
+  const [errArch,setErrArch]=useState('');
+  const [statusFilter,setStatusFilter]=useState('all');
+  const [sortAsc,setSortAsc]=useState(false);
+
+  const bloquesDatos=[project.exp1Data,project.exp2Data,project.exp3Data,project.busquedaCsv,project.vozCsv,project.funnelVolCsv,project.funnelDispCsv,project.crm?.csv,project.kpisCsv];
+  const fuentesCargadas=bloquesDatos.filter(Boolean).length;
+  const ultimaActualizacion=Object.values(project.timestamps||{}).sort().slice(-1)[0]||project.createdAt;
+
+  async function generarArquetipos(){
+    if(!apiKey) return;
+    setGenArch(true);setErrArch('');
+    try{
+      const ctx=[
+        project.exp1Data?`Exp1 (quién es el usuario) — columnas: ${project.exp1Data.headers.join(', ')}. Filas: ${JSON.stringify(project.exp1Data.rows.slice(0,25))}`:null,
+        project.exp2Data?`Exp2 (cómo llega) — columnas: ${project.exp2Data.headers.join(', ')}. Filas: ${JSON.stringify(project.exp2Data.rows.slice(0,25))}`:null,
+        project.exp3Data?`Exp3 (cómo navega) — columnas: ${project.exp3Data.headers.join(', ')}. Filas: ${JSON.stringify(project.exp3Data.rows.slice(0,25))}`:null,
+      ].filter(Boolean).join('\n\n');
+      const listaNombres=ARQUETIPOS_BASE.map(a=>a.n).join(', ');
+      const prompt=`Eres un analista CRO. Este es un ecommerce de sector "${project.sector}". Datos disponibles:\n\n${ctx||'(sin CSV de comportamiento subido — estima con criterio general del sector)'}\n\nClasifica la población de usuarios en estos 10 arquetipos fijos: ${listaNombres}. Para cada uno, estima el % de población (deben sumar 100 entre los 10) y escribe: descripción (1 frase), señales que lo identifican (1 frase, concreta si hay datos), qué necesita (1 frase), qué se recomienda (1 frase accionable). Responde SOLO con un array JSON de 10 objetos con claves: nombre, poblacion (número), descripcion, senales, necesita, recomendacion.`;
+      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido, sin markdown ni texto extra.');
+      const parsed=JSON.parse(raw.replace(/```json/g,'').replace(/```/g,'').trim());
+      onUpdateProject({...project,archetypes:parsed,archetypesGeneratedAt:new Date().toISOString()});
+    }catch(e){
+      setErrArch('No se pudieron generar los arquetipos: '+e.message);
+    }finally{
+      setGenArch(false);
+    }
+  }
+
+  const archSig=(project.archetypes||[]).filter(a=>a.poblacion>=3).sort((a,b)=>b.poblacion-a.poblacion);
+  const archOtros=(project.archetypes||[]).filter(a=>a.poblacion<3).reduce((s,a)=>s+a.poblacion,0);
+
+  const testsFiltrados=project.tests
+    .filter(t=>statusFilter==='all'||t.status===statusFilter)
+    .sort((a,b)=>sortAsc?a.createdAt.localeCompare(b.createdAt):b.createdAt.localeCompare(a.createdAt));
+
   return(
     <div className="fade" style={{padding:'28px 32px'}}>
       <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'6px'}}>
@@ -304,72 +355,118 @@ function ProjectDetail({project,onBack,onEdit,onNewTest,onViewTest,onViewReport}
         <span style={{color:C.txtDim}}>/</span>
         <span style={{fontSize:'13px',color:C.txt}}>{project.name}</span>
       </div>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'24px',flexWrap:'wrap',gap:'12px'}}>
-        <div>
-          <h1 style={T.h1}>{project.name}</h1>
-          <p style={{...T.mono,marginTop:'3px'}}>{project.domain}</p>
-        </div>
-        <div style={{display:'flex',gap:'10px'}}>
-          <Btn variant='ghost' onClick={onEdit}>Editar datos base</Btn>
-          <Btn variant='ghost' onClick={onViewReport}>Ver reporte</Btn>
-          <Btn onClick={onNewTest}>+ Crear test</Btn>
-        </div>
+      <div style={{marginBottom:'20px'}}>
+        <h1 style={T.h1}>{project.name}</h1>
+        <p style={{...T.mono,marginTop:'3px'}}>{project.domain}</p>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px',marginBottom:'24px'}}>
-        {[
-          {label:'CVR base',val:project.kpis.cvr+'%',col:C.green},
-          {label:'Ticket medio',val:project.kpis.ticket+'€',col:C.white},
-          {label:'Tráfico/mes',val:Number(project.kpis.trafico).toLocaleString(),col:C.white},
-          {label:'Calidad datos',val:project.quality+'%',col:project.quality>=80?C.green:C.amber},
-        ].map(m=>(
-          <Card key={m.label} style={{textAlign:'center'}}>
-            <div style={{fontSize:'22px',fontWeight:700,color:m.col,marginBottom:'3px'}}>{m.val}</div>
-            <div style={T.small}>{m.label}</div>
-          </Card>
-        ))}
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px',marginBottom:'24px'}}>
-        <Card>
-          <p style={{...T.label,marginBottom:'12px'}}>Fuentes de datos cargadas</p>
+
+      {/* 1. DATOS BASE */}
+      <Card style={{marginBottom:'20px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'14px',flexWrap:'wrap',gap:'10px'}}>
+          <div>
+            <p style={T.h3}>Precisión de los datos</p>
+            <p style={{...T.small,marginTop:'3px'}}>🕐 Última actualización: {ultimaActualizacion}</p>
+          </div>
+          <div style={{display:'flex',gap:'8px'}}>
+            <Btn variant='ghost' small onClick={onEdit}>Editar datos base</Btn>
+            <Btn variant='ghost' small onClick={onViewReport}>Ver reportes</Btn>
+          </div>
+        </div>
+        <div style={{height:'6px',background:'#0A0A18',borderRadius:'3px',overflow:'hidden',marginBottom:'6px'}}>
+          <div style={{height:'100%',width:`${project.quality}%`,background:project.quality>=80?C.green:C.amber}}></div>
+        </div>
+        <p style={{...T.small,color:project.quality>=80?C.green:C.amber,marginBottom:'16px'}}>{project.quality}% completo · {project.quality>=80?'alta precisión':'precisión básica'}</p>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'10px'}}>
           {[
-            {label:'Exp 1 — Quién es el usuario',done:project.exp1,req:true,data:project.exp1Data},
-            {label:'Exp 2 — Cómo llega',done:project.exp2,req:false,data:project.exp2Data},
-            {label:'Exp 3 — Cómo navega',done:project.exp3,req:false,data:project.exp3Data},
-          ].map(e=>(
-            <div key={e.label} style={{padding:'7px 0',borderBottom:`1px solid ${C.border}`}}>
-              <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                <span style={{fontSize:'13px',color:e.done?C.green:C.red}}>{e.done?'✓':'○'}</span>
-                <span style={{fontSize:'13px',color:e.done?C.txt:C.txtDim,flex:1}}>{e.label}</span>
-                {e.req&&<Tag color='purple'>Obligatorio</Tag>}
-              </div>
-              {e.done&&e.data?.fileName&&(
-                <p style={{fontSize:'10px',color:C.txtDim,marginTop:'2px',paddingLeft:'21px'}}>📄 {e.data.fileName}</p>
-              )}
+            {label:'CVR base',val:project.kpis.cvr?project.kpis.cvr+'%':'—'},
+            {label:'Ticket medio',val:project.kpis.ticket?project.kpis.ticket+'€':'—'},
+            {label:'Tráfico/mes',val:project.kpis.trafico?Number(project.kpis.trafico).toLocaleString():'—'},
+            {label:'Fuentes cargadas',val:`${fuentesCargadas} / 9`},
+          ].map(m=>(
+            <div key={m.label} style={{background:'#0A0A18',borderRadius:'8px',padding:'10px 12px'}}>
+              <p style={{fontSize:'10px',color:C.txtDim,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'4px'}}>{m.label}</p>
+              <p style={{fontSize:'16px',fontWeight:600,color:C.txt}}>{m.val}</p>
             </div>
           ))}
-        </Card>
-        <Card>
-          <p style={{...T.label,marginBottom:'12px'}}>Canales principales</p>
-          {project.canales.filter(c=>c.canal).map((c,i)=>(
-            <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:`1px solid ${C.border}`}}>
-              <span style={{fontSize:'13px',color:C.txt}}>{c.canal}</span>
-              <span style={{fontSize:'13px',fontWeight:600,color:C.accent}}>{c.pct}%</span>
-            </div>
-          ))}
-        </Card>
-      </div>
-      <div>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px'}}>
-          <h2 style={T.h2}>Tests</h2>
-          <Btn small onClick={onNewTest}>+ Nuevo test</Btn>
         </div>
-        {project.tests.length===0
+      </Card>
+
+      {/* 2. ARQUETIPOS */}
+      <div style={{marginBottom:'24px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'12px',flexWrap:'wrap',gap:'8px'}}>
+          <h2 style={T.h2}>Arquetipos generados a partir de los datos</h2>
+          <span style={{...T.small}}>
+            {project.archetypesGeneratedAt?`Generado ${project.archetypesGeneratedAt.slice(0,10)}`:'Sin generar'} ·{' '}
+            <button onClick={generarArquetipos} disabled={genArch}
+              style={{fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer'}}>
+              {genArch?'Generando...':project.archetypes?.length?'Regenerar':'Generar arquetipos'}
+            </button>
+          </span>
+        </div>
+        {errArch&&<p style={{...T.small,color:C.red,marginBottom:'10px'}}>{errArch}</p>}
+        {!project.archetypes?.length?(
+          <Card style={{textAlign:'center',padding:'24px',color:C.txtDim}}>
+            <p style={{...T.body}}>Todavía no se han generado arquetipos para este proyecto.</p>
+          </Card>
+        ):(
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+            {archSig.map(a=>(
+              <div key={a.nombre} onClick={()=>setOpenArch(openArch===a.nombre?null:a.nombre)}
+                style={{border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',cursor:'pointer'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:'13px',fontWeight:600,color:C.txt}}>{a.nombre}</span>
+                  <span style={{fontSize:'12px',color:C.accent,fontWeight:700}}>{a.poblacion}%</span>
+                </div>
+                {openArch===a.nombre&&(
+                  <div style={{marginTop:'10px',paddingTop:'10px',borderTop:`1px solid ${C.border}`}}>
+                    <p style={{fontSize:'12px',color:C.txtMid,marginBottom:'8px'}}>{a.descripcion}</p>
+                    <p style={{fontSize:'11px',color:C.txtDim,marginBottom:'4px'}}><b style={{color:C.txt,fontWeight:600}}>Señales:</b> {a.senales}</p>
+                    <p style={{fontSize:'11px',color:C.txtDim,marginBottom:'4px'}}><b style={{color:C.txt,fontWeight:600}}>Necesita:</b> {a.necesita}</p>
+                    <p style={{fontSize:'11px',color:C.txtDim}}><b style={{color:C.txt,fontWeight:600}}>Se recomienda:</b> {a.recomendacion}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+            {archOtros>0&&(
+              <div style={{border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',opacity:0.6}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:'13px',color:C.txtDim}}>Otros (poco representados)</span>
+                  <span style={{fontSize:'12px',color:C.txtDim,fontWeight:700}}>{Math.round(archOtros)}%</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 3. TESTS */}
+      <div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px',flexWrap:'wrap',gap:'8px'}}>
+          <h2 style={T.h2}>Tests</h2>
+          <Btn small onClick={onNewTest}>+ Crear test</Btn>
+        </div>
+        <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginBottom:'14px'}}>
+          {[{v:'all',label:'Todos'},{v:'en curso',label:'En curso'},{v:'completado',label:'Completado'}].map(f=>(
+            <button key={f.v} onClick={()=>setStatusFilter(f.v)}
+              style={{fontSize:'12px',padding:'6px 12px',borderRadius:'8px',cursor:'pointer',
+                border:`1px solid ${statusFilter===f.v?C.accent:C.border}`,
+                background:statusFilter===f.v?C.accentDim:'transparent',
+                color:statusFilter===f.v?C.accent:C.txtDim}}>
+              {f.label}
+            </button>
+          ))}
+          <button onClick={()=>setSortAsc(!sortAsc)}
+            style={{fontSize:'12px',padding:'6px 12px',borderRadius:'8px',cursor:'pointer',border:`1px solid ${C.border}`,background:'transparent',color:C.txtDim}}>
+            Fecha {sortAsc?'↑':'↓'}
+          </button>
+        </div>
+        {testsFiltrados.length===0
           ? <Card style={{textAlign:'center',padding:'32px',color:C.txtDim}}>
               <p style={{fontSize:'32px',marginBottom:'8px'}}>◎</p>
-              <p style={{...T.body}}>Todavía no hay tests en este proyecto.</p>
-              <Btn style={{marginTop:'14px'}} onClick={onNewTest}>Crear primer test</Btn>
+              <p style={{...T.body}}>{project.tests.length===0?'Todavía no hay tests en este proyecto.':'No hay tests con este filtro.'}</p>
+              {project.tests.length===0&&<Btn style={{marginTop:'14px'}} onClick={onNewTest}>Crear primer test</Btn>}
             </Card>
-          : project.tests.map(t=>(
+          : testsFiltrados.map(t=>(
             <Card key={t.id} style={{marginBottom:'10px',cursor:'pointer'}} onClick={()=>onViewTest(t)}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <div style={{flex:1}}>
@@ -484,6 +581,7 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
   const [timestamps,setTimestamps]=useState(initial?.timestamps||{});
   const [insights,setInsights]=useState(initial?.insights||{});
   const [savingAI,setSavingAI]=useState(false);
+  const [savedToast,setSavedToast]=useState(false);
   function touch(key){ setTimestamps(prev=>({...prev,[key]:new Date().toISOString()})); }
   function timeAgo(iso){
     if(!iso) return null;
@@ -882,6 +980,8 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
       timestamps,insights,
       tests:initial?.tests||[]
     });
+    setSavedToast(true);
+    setTimeout(()=>setSavedToast(false),3000);
   }
 
   // Step tab bar
@@ -905,6 +1005,11 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
 
   return(
     <div className='fade' style={{padding:'28px 32px',maxWidth:'680px'}}>
+      {savedToast&&(
+        <div style={{position:'fixed',top:'20px',right:'20px',background:C.green,color:'#04342C',padding:'11px 18px',borderRadius:'8px',fontSize:'13px',fontWeight:600,zIndex:9999,boxShadow:'0 4px 16px rgba(0,0,0,0.35)',display:'flex',alignItems:'center',gap:'6px'}}>
+          ✓ Guardado correctamente
+        </div>
+      )}
       <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'16px'}}>
         <button onClick={onCancel} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px'}}>← Proyectos</button>
         <span style={{color:C.txtDim}}>/</span>
@@ -1779,19 +1884,21 @@ SEGMENTO DEL TEST:
 - Canal: ${segCanal==='todos'?'Todos':segCanal+' ÚNICAMENTE'}
 ${tieneSesiones?'Filtra el CSV por el segmento indicado y usa solo esas filas.':''}
 
-TIPOS DE PERFIL a distribuir (usa los más relevantes para ${project.sector}):
-Arquetipos CRO universales: esceptico, cazador_precio, impulsivo, analitico, perdido, ideal
-Para ecommerce añade: recurrente, primerizo, movil, escritorio, regalo
-Para lead gen / SaaS añade: investigador, comparador, decidido
+${project.archetypes&&project.archetypes.length
+  ?`ARQUETIPOS DEL PROYECTO (ya calculados a partir de los datos reales subidos — RESPETA estos % de población, no inventes otros):
+${JSON.stringify(project.archetypes.map(a=>({nombre:a.nombre,poblacion:a.poblacion,necesita:a.necesita,recomendacion:a.recomendacion})))}`
+  :`ARQUETIPOS CANÓNICOS (este proyecto todavía no tiene arquetipos calculados con datos reales — usa criterio del sector "${project.sector}" para estimar el % de cada uno, deben sumar 100):
+${JSON.stringify(ARQUETIPOS_BASE.map(a=>({nombre:a.n,necesita:a.need,consciencia_tipica:a.consciencia})))}`}
+IMPORTANTE: usa EXCLUSIVAMENTE estos nombres de arquetipo para el campo "tipo_perfil" de cada perfil. No inventes tipos nuevos ni uses otro vocabulario.
 
-CONTEXTO DE CANALES (usa esto para determinar nivel_consciencia, motivacion y comportamiento según el canal de cada perfil):
+CONTEXTO DE CANALES (usa esto para matizar el nivel_consciencia y el comportamiento — el canal ajusta, no sustituye, la tendencia típica del arquetipo):
 ${JSON.stringify(CANAL_CONTEXTO)}
 
 REGLAS:
-- Distribuye los ${n} perfiles entre los tipos más representativos del sector
+- Distribuye los ${n} perfiles respetando el % de población de cada arquetipo indicado arriba
 - prob_conversion anclado al CVR real del segmento
-- nivel_consciencia (1-5) determinado por el canal de entrada según el contexto de canales arriba
-- urgencia coherente con fase_funnel y tipo
+- nivel_consciencia (1-5): parte de la tendencia típica del arquetipo asignado (consciencia_tipica si no hay datos reales, o el criterio general del arquetipo si sí los hay) y ajústalo según el canal de entrada
+- urgencia coherente con fase_funnel y arquetipo
 - objeciones y motivadores específicos para ${project.sector}
 - comportamiento digital coherente con edad, nivel_digital y canal
 - canal_entrada determina fase_funnel: Paid Social → descubrimiento, Email → decisión, Retargeting → consideración avanzada, Directo → decisión
@@ -1810,7 +1917,7 @@ Devuelve SOLO array JSON. Cada perfil DEBE tener todos estos campos:
   "nivel_digital":"alto",
   "canal":"Orgánico / SEO",
   "tipo":"recurrente",
-  "tipo_perfil":["analitico","recurrente"],
+  "tipo_perfil":["El comparador","El recurrente"],
   "objetivo_principal":"Encontrar zapatillas para running diario",
   "problema":"Sus zapatillas actuales le dañan la rodilla",
   "urgencia":"media",
@@ -1902,16 +2009,17 @@ ${JSON.stringify(sample,null,2)}
 LÓGICA:
 - Para cada arquetipo, calcula cómo reaccionaría a variante A vs B
 - Ten en cuenta: motivadores, objeciones, nivel_consciencia, urgencia, compra_impulsiva, lee_resenas
-- Un escéptico (lee_resenas:true) responde mejor a CTAs con prueba social
-- Un impulsivo (compra_impulsiva:true) responde a urgencia y CTAs directos
-- Un analítico necesita información — cambios que quitan info le perjudican
+- El desconfiado (lee_resenas:true) responde mejor a CTAs con prueba social
+- El decidido / El recurrente (compra_impulsiva:true) responden a urgencia y CTAs directos
+- El investigador / El comparador necesitan información — cambios que quitan info les perjudican
 - nivel_consciencia 5 = listo para comprar, responde bien a CTAs directos
 - nivel_consciencia 1-2 = necesita educación primero, CTAs agresivos le alejan
 - B NO gana automáticamente — puede perjudicar a ciertos arquetipos
 - Los resultados finales deben escalar al volumen de ${totalSesiones.toLocaleString()} sesiones
+- En "segmentos", agrupa usando EXACTAMENTE los nombres de tipo_perfil de los arquetipos (los mismos del catálogo del proyecto) — no inventes categorías nuevas ni las renombres
 
 Devuelve SOLO JSON:
-{"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"cvr_b":2.6,"sesiones_a":${Math.round(totalSesiones*split/100)},"sesiones_b":${Math.round(totalSesiones*(100-split)/100)},"conversiones_a":0,"conversiones_b":0,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,"segmentos":[{"nombre":"Escéptico","resultado":"B gana","diff_pct":12,"razon":"Nuevo CTA transmite más confianza"}],"razones_abandono":["razón 1","razón 2"],"insights":["insight 1","insight 2"],"recomendacion":"texto accionable"}`;
+{"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"cvr_b":2.6,"sesiones_a":${Math.round(totalSesiones*split/100)},"sesiones_b":${Math.round(totalSesiones*(100-split)/100)},"conversiones_a":0,"conversiones_b":0,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,"segmentos":[{"nombre":"El desconfiado","resultado":"B gana","diff_pct":12,"razon":"Nuevo CTA transmite más confianza"}],"razones_abandono":["razón 1","razón 2"],"insights":["insight 1","insight 2"],"recomendacion":"texto accionable"}`;
       const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido.');
       setResults(parseJSON(raw));setTsub(4);
     }catch(e){setErrSim('Error: '+e.message);}
@@ -2651,9 +2759,9 @@ function App(){
         {nav==='projects'&&(
           <>
             {view.screen==='list'&&<ProjectsList projects={projects} onSelect={p=>setView({screen:'detail',project:p})} onCreate={()=>setView({screen:'create'})}/>}
-            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView({screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
+            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} apiKey={apiKey} onUpdateProject={p=>setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr))} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView({screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
             {view.screen==='create'&&<CreateProject apiKey={apiKey} onSave={addProject} onCancel={()=>setView({screen:'list'})}/>}
-            {view.screen==='edit'&&currentProject&&<CreateProject apiKey={apiKey} initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));setView({screen:'detail',project:p});}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
+            {view.screen==='edit'&&currentProject&&<CreateProject apiKey={apiKey} initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='newtest'&&currentProject&&<CreateTest project={currentProject} apiKey={apiKey} onSave={t=>addTest(currentProject.id,t)} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='report'&&currentProject&&<ReportView project={currentProject} test={view.test} results={view.test?.results} onBack={()=>setView({screen:'detail',project:currentProject})}/>}
           </>
