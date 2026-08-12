@@ -180,10 +180,22 @@ const PILOT_PROJECT={
 
 const PILOT_RESULTS={
   t1:{ganador:'B',confianza:94,uplift_cvr:11.4,cvr_a:2.4,cvr_b:2.67,clics_cta_a:14,clics_cta_b:18,rebote_a:44,rebote_b:40,
-    segmentos:[{nombre:'18-24',resultado:'B gana fuerte',diff_pct:28},{nombre:'25-34',resultado:'B gana',diff_pct:18},{nombre:'35-44',resultado:'B gana leve',diff_pct:7},{nombre:'45-54',resultado:'A gana leve',diff_pct:-6},{nombre:'55+',resultado:'A gana',diff_pct:-14}],
+    segmentos:[
+      {nombre:'El decidido',poblacion:14,resultado:'B gana fuerte',diff_pct:24,razon:'El CTA directo reduce aún más la fricción para quien ya sabe lo que quiere.',
+        audiencias:[{tipo:'edad',valor:'18-24',resultado:'B gana fuerte',diff_pct:28},{tipo:'canal',valor:'Directo',resultado:'B gana fuerte',diff_pct:22}]},
+      {nombre:'El desconfiado',poblacion:9,resultado:'A gana',diff_pct:-9,razon:'El texto "Comprar ahora" presiona sin ofrecer garantías adicionales, genera desconfianza.',
+        audiencias:[{tipo:'edad',valor:'45-54',resultado:'A gana',diff_pct:-14},{tipo:'género',valor:'mujer',resultado:'A gana leve',diff_pct:-5}]},
+      {nombre:'El sensible al precio',poblacion:12,resultado:'B gana leve',diff_pct:6,razon:'El nuevo diseño no cambia la percepción de precio, el efecto es marginal.',audiencias:[]},
+      {nombre:'El recurrente',poblacion:9,resultado:'B gana',diff_pct:18,razon:'Usuarios que ya conocen el producto valoran positivamente la rapidez del nuevo CTA.',audiencias:[]},
+    ],
     razones_abandono:['El CTA verde genera urgencia excesiva en usuarios mayores de 45','El texto "Comprar ahora" presiona a perfiles de baja madurez digital','En desktop el botón queda fuera del área de scroll inicial'],
     insights:['B mejora significativamente en mobile jóvenes (18-34). Si el tráfico mobile supera el 60%, el efecto global es positivo.','El segmento 45+ responde peor a B. Considera una variante C más neutra para ese segmento.','El AOV no varía — B atrae más compradores pero no cambia el ticket.'],
-    recomendacion:'Implementa variante B para usuarios mobile menores de 45 años (61% del tráfico). Mantén A para usuarios 45+ y desktop hasta validar con tráfico real. Uplift estimado sobre tráfico total: +6.8% de conversión.'},
+    recomendacion_general:'Implementa variante B para usuarios mobile menores de 45 años (61% del tráfico). Mantén A para usuarios 45+ y desktop hasta validar con tráfico real. Uplift estimado sobre tráfico total: +6.8% de conversión.',
+    recomendaciones:[
+      {titulo:'Personalizar CTA para el segmento 45+',tipo:'personalizacion',accion:'Mostrar la variante A (CTA original) a usuarios 45+ en vez de forzar la B ganadora en todo el tráfico.',kpi_afectado:'Tasa de conversión 45+',retorno_esperado:'Evita una caída estimada del 9-14% de CVR en ese segmento'},
+      {titulo:'Test adicional: sello de confianza para El desconfiado',tipo:'nuevo_test',accion:'Probar una tercera variante con reviews visibles junto al CTA, sin cambiar el copy de urgencia.',kpi_afectado:'Tasa de rebote, CVR',retorno_esperado:'+3-6% CVR estimado en este arquetipo'},
+      {titulo:'Extender el CTA directo a la home',tipo:'nuevo_test',accion:'El decidido responde muy bien al CTA directo en PDP — probar el mismo patrón en la home para captar mejor a este arquetipo desde la entrada.',kpi_afectado:'CTR home → PDP',retorno_esperado:'+5-10% CTR estimado en usuarios Directo/Recurrente'},
+    ]},
 };
 
 // ── CLAUDE API ────────────────────────────────────────────────────────────
@@ -393,7 +405,7 @@ function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,o
 
       {/* 2. ARQUETIPOS */}
       <div style={{marginBottom:'24px'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'12px',flexWrap:'wrap',gap:'8px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'6px',flexWrap:'wrap',gap:'8px'}}>
           <h2 style={T.h2}>Arquetipos generados a partir de los datos</h2>
           <span style={{...T.small}}>
             {project.archetypesGeneratedAt?`Generado ${project.archetypesGeneratedAt.slice(0,10)}`:'Sin generar'} ·{' '}
@@ -403,6 +415,7 @@ function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,o
             </button>
           </span>
         </div>
+        <p style={{...T.small,marginBottom:'12px'}}>Son 10 patrones de comportamiento que se repiten en prácticamente cualquier ecommerce — no son personas inventadas, sino la forma en que ya clasificamos tu tráfico real según sus señales de navegación, precio e intención de compra.</p>
         {errArch&&<p style={{...T.small,color:C.red,marginBottom:'10px'}}>{errArch}</p>}
         {!project.archetypes?.length?(
           <Card style={{textAlign:'center',padding:'24px',color:C.txtDim}}>
@@ -2005,6 +2018,7 @@ Sesiones totales simuladas: ${totalSesiones.toLocaleString()} (${arquetipos.leng
 
 ARQUETIPOS (cada uno representa un % del tráfico total):
 ${JSON.stringify(sample,null,2)}
+${project.archetypes&&project.archetypes.length?`\n% DE POBLACIÓN REAL DE CADA ARQUETIPO EN ESTE PROYECTO (úsalos, no los inventes de nuevo):\n${JSON.stringify(project.archetypes.map(a=>({nombre:a.nombre,poblacion:a.poblacion})))}`:''}
 
 LÓGICA:
 - Para cada arquetipo, calcula cómo reaccionaría a variante A vs B
@@ -2017,9 +2031,17 @@ LÓGICA:
 - B NO gana automáticamente — puede perjudicar a ciertos arquetipos
 - Los resultados finales deben escalar al volumen de ${totalSesiones.toLocaleString()} sesiones
 - En "segmentos", agrupa usando EXACTAMENTE los nombres de tipo_perfil de los arquetipos (los mismos del catálogo del proyecto) — no inventes categorías nuevas ni las renombres
+- Incluye en "segmentos" SOLO los arquetipos donde A y B muestran una diferencia real (no ruido estadístico) — si un arquetipo se comporta igual en A y en B, no lo incluyas
+- Dentro de cada segmento (arquetipo), añade "audiencias": 2-4 cruces relevantes por género, edad, dispositivo o canal SOLO si el patrón es realmente distinto dentro de ese arquetipo (no rellenes por rellenar — si todos los sub-grupos se comportan igual, deja audiencias como array vacío)
+- En "recomendaciones", ve más allá del ganador del test: usa lo que revelan los arquetipos para proponer 2-4 acciones concretas — pueden ser personalizaciones (mostrar variante distinta según arquetipo/audiencia) o propuestas de nuevos tests A/B derivados de lo que has visto. Cada una con su kpi_afectado y una estimación realista de retorno_esperado (rango %, no cifra falsa de precisión)
 
 Devuelve SOLO JSON:
-{"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"cvr_b":2.6,"sesiones_a":${Math.round(totalSesiones*split/100)},"sesiones_b":${Math.round(totalSesiones*(100-split)/100)},"conversiones_a":0,"conversiones_b":0,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,"segmentos":[{"nombre":"El desconfiado","resultado":"B gana","diff_pct":12,"razon":"Nuevo CTA transmite más confianza"}],"razones_abandono":["razón 1","razón 2"],"insights":["insight 1","insight 2"],"recomendacion":"texto accionable"}`;
+{"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"cvr_b":2.6,"sesiones_a":${Math.round(totalSesiones*split/100)},"sesiones_b":${Math.round(totalSesiones*(100-split)/100)},"conversiones_a":0,"conversiones_b":0,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,
+"segmentos":[{"nombre":"El desconfiado","poblacion":9,"resultado":"B gana","diff_pct":12,"razon":"Nuevo CTA transmite más confianza","audiencias":[{"tipo":"género","valor":"mujer","resultado":"B gana fuerte","diff_pct":18},{"tipo":"canal","valor":"Orgánico / SEO","resultado":"A gana leve","diff_pct":-4}]}],
+"razones_abandono":["razón 1","razón 2"],
+"insights":["insight 1","insight 2"],
+"recomendacion_general":"1-2 frases con la lectura global de qué hacer con este resultado",
+"recomendaciones":[{"titulo":"Personalizar CTA para el segmento 45+","tipo":"personalizacion","accion":"Mostrar la variante A (CTA original) a usuarios 45+ en vez de forzar la B ganadora","kpi_afectado":"Tasa de conversión 45+","retorno_esperado":"Evita una caída estimada del 6-8% de CVR en ese segmento"},{"titulo":"Test adicional: CTA con prueba social para El desconfiado","tipo":"nuevo_test","accion":"Probar una tercera variante con sello de confianza visible junto al CTA","kpi_afectado":"Tasa de rebote, CVR","retorno_esperado":"+3-5% CVR estimado en este arquetipo"}]}`;
       const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido.');
       setResults(parseJSON(raw));setTsub(4);
     }catch(e){setErrSim('Error: '+e.message);}
@@ -2586,9 +2608,9 @@ Devuelve SOLO JSON:
 function ReportView({project,test,results,onBack}){
   const r=results||PILOT_RESULTS[test?.id]||{};
   const gB=r.ganador==='B';
-  const IC=[C.green,C.amber,C.red,C.accent];
+  const [openSeg,setOpenSeg]=useState(null);
   function copiar(){
-    const txt=`REPORTE TEST A/B — SynthAB\n\nProyecto: ${project.name}\nURL: ${test?.url}\n\nGanador: Variante ${r.ganador}\nUplift CVR: ${r.uplift_cvr>0?'+':''}${Number(r.uplift_cvr).toFixed(1)}%\nConfianza: ${r.confianza}%\n\nRecomendación:\n${r.recomendacion}`;
+    const txt=`REPORTE TEST A/B — SynthAB\n\nProyecto: ${project.name}\nURL: ${test?.url}\n\nGanador: Variante ${r.ganador}\nUplift CVR: ${r.uplift_cvr>0?'+':''}${Number(r.uplift_cvr).toFixed(1)}%\nConfianza: ${r.confianza}%\n\nRecomendación:\n${r.recomendacion_general||r.recomendacion||''}`;
     navigator.clipboard.writeText(txt).then(()=>alert('Copiado ✓'));
   }
   if(!r.ganador) return(
@@ -2601,6 +2623,7 @@ function ReportView({project,test,results,onBack}){
       </Card>
     </div>
   );
+  const tipoTag={personalizacion:{color:'purple',label:'Personalización'},nuevo_test:{color:'blue',label:'Nuevo test A/B'}};
   return(
     <div className='fade' style={{padding:'28px 32px',maxWidth:'680px'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'20px',flexWrap:'wrap',gap:'10px'}}>
@@ -2611,6 +2634,8 @@ function ReportView({project,test,results,onBack}){
         </div>
         <Btn variant='ghost' onClick={copiar}>Copiar reporte</Btn>
       </div>
+
+      {/* 1. GANADOR OFICIAL */}
       <div style={{background:'#0A1A14',border:'1px solid rgba(0,212,170,0.2)',borderRadius:'12px',padding:'18px 20px',marginBottom:'16px',display:'flex',alignItems:'center',gap:'14px'}}>
         <span style={{fontSize:'28px'}}>🏆</span>
         <div style={{flex:1}}>
@@ -2622,7 +2647,7 @@ function ReportView({project,test,results,onBack}){
           <div style={{fontSize:'11px',color:'#3A5A4A'}}>uplift CVR</div>
         </div>
       </div>
-      <Card style={{marginBottom:'12px'}}>
+      <Card style={{marginBottom:'20px'}}>
         <p style={{...T.label,marginBottom:'10px'}}>Métricas principales</p>
         {[
           {name:'Tasa de conversión ⭐',a:(r.cvr_a||0).toFixed(1)+'%',b:(r.cvr_b||0).toFixed(1)+'%',diff:r.uplift_cvr,pos:gB},
@@ -2637,18 +2662,49 @@ function ReportView({project,test,results,onBack}){
           </div>
         ))}
       </Card>
-      {r.segmentos&&r.segmentos.length>0&&(
-        <Card style={{marginBottom:'12px'}}>
-          <p style={{...T.label,marginBottom:'10px'}}>Por segmento</p>
+
+      {/* 2. POR ARQUETIPO, con desglose de audiencias */}
+      {r.segmentos&&r.segmentos.length>0&&(()=>{
+        const pobs=r.segmentos.map(sg=>sg.poblacion).filter(p=>p!=null);
+        const sumPob=pobs.length===r.segmentos.length?pobs.reduce((s,p)=>s+p,0):null;
+        const resto=sumPob!=null?Math.max(0,Math.round(100-sumPob)):null;
+        return(
+        <div style={{marginBottom:'20px'}}>
+          <h2 style={{...T.h2,marginBottom:'6px'}}>Cómo reacciona cada arquetipo</h2>
+          <p style={{...T.small,marginBottom:'12px'}}>
+            Se muestran los {r.segmentos.length} arquetipos donde A y B se comportan de forma distinta{sumPob!=null?` — juntos son el ${sumPob}% del tráfico simulado`:''}.
+            {resto!=null&&resto>0?` El ${resto}% restante no mostró diferencias relevantes entre variantes, así que no cambia la decisión del ganador.`:''}
+          </p>
           {r.segmentos.map(sg=>(
-            <div key={sg.nombre} style={{display:'flex',alignItems:'center',gap:'8px',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'12px'}}>
-              <span style={{minWidth:'55px',fontWeight:600,color:C.txt}}>{sg.nombre}</span>
-              <span style={{flex:1,color:C.txtMid}}>{sg.resultado}</span>
-              <Tag color={sg.resultado.toLowerCase().includes('b')?'green':'amber'}>{sg.diff_pct>0?'+':''}{sg.diff_pct}%</Tag>
+            <div key={sg.nombre} onClick={()=>setOpenSeg(openSeg===sg.nombre?null:sg.nombre)}
+              style={{border:`1px solid ${C.border}`,borderRadius:'10px',padding:'12px 14px',marginBottom:'8px',cursor:sg.audiencias?.length?'pointer':'default'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                <span style={{fontSize:'13px',fontWeight:600,color:C.txt,flex:1}}>{sg.nombre}</span>
+                {sg.poblacion!=null&&<span style={{fontSize:'11px',color:C.txtDim}}>{sg.poblacion}% tráfico</span>}
+                <span style={{fontSize:'12px',color:C.txtMid}}>{sg.resultado}</span>
+                <Tag color={sg.resultado.toLowerCase().includes('b')?'green':'amber'}>{sg.diff_pct>0?'+':''}{sg.diff_pct}%</Tag>
+                {sg.audiencias?.length>0&&<span style={{fontSize:'11px',color:C.txtDim}}>{openSeg===sg.nombre?'▲':'▼'}</span>}
+              </div>
+              {sg.razon&&<p style={{fontSize:'11px',color:C.txtDim,marginTop:'4px'}}>{sg.razon}</p>}
+              {openSeg===sg.nombre&&sg.audiencias?.length>0&&(
+                <div style={{marginTop:'10px',paddingTop:'10px',borderTop:`1px solid ${C.border}`}}>
+                  <p style={{...T.small,marginBottom:'8px'}}>Audiencias con comportamiento distinto dentro de este arquetipo</p>
+                  {sg.audiencias.map((au,i)=>(
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',padding:'5px 0',fontSize:'12px'}}>
+                      <span style={{color:C.txtDim,minWidth:'55px',textTransform:'capitalize'}}>{au.tipo}</span>
+                      <span style={{flex:1,color:C.txt}}>{au.valor}</span>
+                      <span style={{color:C.txtMid,fontSize:'11px'}}>{au.resultado}</span>
+                      <Tag color={au.diff_pct>0?'green':'amber'}>{au.diff_pct>0?'+':''}{au.diff_pct}%</Tag>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
-        </Card>
-      )}
+        </div>
+        );
+      })()}
+
       {r.razones_abandono&&r.razones_abandono.length>0&&(
         <Card style={{marginBottom:'12px'}}>
           <p style={{...T.label,marginBottom:'10px'}}>Razones de abandono — Variante B</p>
@@ -2660,22 +2716,42 @@ function ReportView({project,test,results,onBack}){
         </Card>
       )}
       {r.insights&&r.insights.length>0&&(
-        <Card style={{marginBottom:'12px'}}>
+        <Card style={{marginBottom:'20px'}}>
           <p style={{...T.label,marginBottom:'10px'}}>Insights clave</p>
           {r.insights.map((ins,i)=>(
             <div key={i} style={{display:'flex',gap:'8px',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px',color:C.txtMid,lineHeight:'1.6'}}>
-              <span style={{color:IC[i]||C.txtDim,flexShrink:0,marginTop:'3px'}}>◆</span>{ins}
+              <span style={{color:[C.green,C.amber,C.red,C.accent][i]||C.txtDim,flexShrink:0,marginTop:'3px'}}>◆</span>{ins}
             </div>
           ))}
         </Card>
       )}
-      {r.recomendacion&&(
-        <div style={{background:'#0F0F2A',border:`1px solid rgba(108,99,255,0.2)`,borderRadius:'12px',padding:'16px 18px',display:'flex',gap:'12px'}}>
-          <span style={{fontSize:'18px',flexShrink:0}}>✦</span>
-          <div>
-            <p style={{...T.h3,marginBottom:'4px'}}>Recomendación</p>
-            <p style={{...T.body}}>{r.recomendacion}</p>
-          </div>
+
+      {/* 3. RECOMENDACIONES */}
+      {(r.recomendacion_general||r.recomendaciones?.length>0)&&(
+        <div>
+          <h2 style={{...T.h2,marginBottom:'10px'}}>Recomendaciones</h2>
+          {r.recomendacion_general&&(
+            <div style={{background:'#0F0F2A',border:`1px solid rgba(108,99,255,0.2)`,borderRadius:'12px',padding:'16px 18px',display:'flex',gap:'12px',marginBottom:'12px'}}>
+              <span style={{fontSize:'18px',flexShrink:0}}>✦</span>
+              <div>
+                <p style={{...T.h3,marginBottom:'4px'}}>Recomendación general</p>
+                <p style={{...T.body}}>{r.recomendacion_general||r.recomendacion}</p>
+              </div>
+            </div>
+          )}
+          {r.recomendaciones?.map((rec,i)=>(
+            <Card key={i} style={{marginBottom:'8px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px',gap:'8px'}}>
+                <p style={{...T.h3,flex:1}}>{rec.titulo}</p>
+                <Tag color={tipoTag[rec.tipo]?.color||'default'}>{tipoTag[rec.tipo]?.label||rec.tipo}</Tag>
+              </div>
+              <p style={{...T.body,marginBottom:'8px'}}>{rec.accion}</p>
+              <div style={{display:'flex',gap:'16px',flexWrap:'wrap'}}>
+                {rec.kpi_afectado&&<p style={{...T.small}}><b style={{color:C.txtMid,fontWeight:600}}>KPI:</b> {rec.kpi_afectado}</p>}
+                {rec.retorno_esperado&&<p style={{...T.small,color:C.green}}><b style={{color:C.green,fontWeight:600}}>Retorno esperado:</b> {rec.retorno_esperado}</p>}
+              </div>
+            </Card>
+          ))}
         </div>
       )}
     </div>
