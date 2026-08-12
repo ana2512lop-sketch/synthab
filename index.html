@@ -470,15 +470,63 @@ const CANAL_CONTEXTO={
   'QR / Offline': 'Viene del mundo físico: cartel, folleto, tienda, evento. Nivel consciencia 2-4 según contexto. Motivación concreta relacionada con el punto de contacto físico. Puede ser primera visita digital a la marca.',
 };
 
-function CreateProject({onSave, onCancel, initial}){
+function CreateProject({onSave, onCancel, initial, apiKey}){
   const STEPS=[
     {num:'01',label:'KPIs'},
     {num:'02',label:'Comportamiento'},
-    {num:'03',label:'Adquisición'},
+    {num:'03',label:'Contexto usuario'},
     {num:'04',label:'Funnel'},
     {num:'05',label:'Negocio'},
   ];
   const [sub,setSub]=useState(0);
+
+  // ── Última actualización + insights IA (todos los bloques) ──────────────
+  const [timestamps,setTimestamps]=useState(initial?.timestamps||{});
+  const [insights,setInsights]=useState(initial?.insights||{});
+  const [savingAI,setSavingAI]=useState(false);
+  function touch(key){ setTimestamps(prev=>({...prev,[key]:new Date().toISOString()})); }
+  function timeAgo(iso){
+    if(!iso) return null;
+    const days=Math.floor((Date.now()-new Date(iso).getTime())/86400000);
+    if(days<=0) return 'hoy';
+    if(days===1) return 'hace 1 día';
+    if(days<30) return `hace ${days} días`;
+    const months=Math.floor(days/30);
+    if(months<12) return `hace ${months} ${months===1?'mes':'meses'}`;
+    const years=Math.floor(months/12);
+    return `hace ${years} ${years===1?'año':'años'}`;
+  }
+  function UpdatedBadge({k}){
+    const t=timestamps[k];
+    if(!t) return <span style={{fontSize:'11px',color:C.txtDim,whiteSpace:'nowrap'}}>🕐 Sin datos aún</span>;
+    const d=new Date(t);
+    const fecha=d.toLocaleDateString('es-ES',{day:'2-digit',month:'short',year:'numeric'});
+    return <span style={{fontSize:'11px',color:C.txtDim,whiteSpace:'nowrap'}}>🕐 Última subida: {fecha} ({timeAgo(t)})</span>;
+  }
+  function InsightBlock({k}){
+    const ins=insights[k];
+    if(!ins) return null;
+    return(
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginTop:'12px'}}>
+        <div style={{background:'#0A0A18',borderRadius:'8px',padding:'10px 12px'}}>
+          <p style={{fontSize:'11px',fontWeight:600,color:C.txtMid,marginBottom:'4px'}}>👁 Comportamiento detectado</p>
+          <p style={{fontSize:'12px',color:C.txt,lineHeight:'1.5'}}>{ins.comportamiento}</p>
+        </div>
+        <div style={{background:C.amberDim,borderRadius:'8px',padding:'10px 12px'}}>
+          <p style={{fontSize:'11px',fontWeight:600,color:C.amber,marginBottom:'4px'}}>💡 Oportunidad</p>
+          <p style={{fontSize:'12px',color:C.amber,lineHeight:'1.5'}}>{ins.oportunidad}</p>
+        </div>
+      </div>
+    );
+  }
+  function CardHeader({title,k,tag}){
+    return(
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px',gap:'10px'}}>
+        <div style={{display:'flex',gap:'8px',alignItems:'center'}}>{tag}<p style={T.h3}>{title}</p></div>
+        <UpdatedBadge k={k}/>
+      </div>
+    );
+  }
 
   // Step 0 — KPIs
   const [name,setName]=useState(initial?.name||'');
@@ -494,6 +542,75 @@ function CreateProject({onSave, onCancel, initial}){
   const [desktop,setDesktop]=useState(initial?.kpis?.desktop||42);
   const [mobile,setMobile]=useState(initial?.kpis?.mobile||51);
   const [tablet,setTablet]=useState(initial?.kpis?.tablet||7);
+  const [kpisCsv,setKpisCsv]=useState(initial?.kpisCsv||null);
+  const refKpis=useRef();
+  const [kpisImg,setKpisImg]=useState(initial?.kpisImg||null);
+  const refKpisImg=useRef();
+
+  // Los KPIs se leen SIEMPRE del CSV subido — nada de valores manuales que puedan quedar desfasados.
+  // Si se quita el CSV, se limpian también los valores derivados (ver setKpisCsvClean más abajo).
+  useEffect(()=>{
+    if(!kpisCsv||!kpisCsv.rows||!kpisCsv.rows.length) return;
+    const headers=kpisCsv.headers;
+    const rows=kpisCsv.rows;
+    const findCol=(...keys)=>headers.find(h=>keys.some(k=>h.toLowerCase().includes(k)));
+    const row=rows[0];
+    const val=(...keys)=>{ const h=findCol(...keys); return h?row[h]:null; };
+    const ok=v=>v!==null&&v!==undefined&&v!=='';
+    const nSes=val('sesion','session'); setSesiones(ok(nSes)?nSes:'');
+    const nTrans=val('transacc','transaction'); setTransacciones(ok(nTrans)?nTrans:'');
+    const nIng=val('ingreso','revenue'); setIngresos(ok(nIng)?nIng:'');
+    const nCvr=val('conversión','conversion','cvr'); setCvr(ok(nCvr)?nCvr:'');
+    const nReb=val('rebote','bounce'); setRebote(ok(nReb)?nReb:'');
+    const nTic=val('ticket','aov','valor medio','ingresos por transacc'); setTicket(ok(nTic)?nTic:'');
+
+    // Desglose por dispositivo: solo si el CSV trae varias filas con dimensión de dispositivo
+    const devCol=findCol('dispositivo','device');
+    if(devCol&&rows.length>1){
+      const sesCol=findCol('sesion','session');
+      const tot={desktop:0,mobile:0,tablet:0};
+      let sum=0;
+      rows.forEach(r=>{
+        const n=parseFloat((r[sesCol]||'0').toString().replace(/\./g,'').replace(',','.'))||0;
+        sum+=n;
+        const dv=(r[devCol]||'').toLowerCase();
+        if(dv.includes('mobile')||dv.includes('móvil')) tot.mobile+=n;
+        else if(dv.includes('desktop')||dv.includes('escritorio')) tot.desktop+=n;
+        else if(dv.includes('tablet')) tot.tablet+=n;
+      });
+      if(sum>0){
+        setDesktop(Math.round(tot.desktop/sum*100));
+        setMobile(Math.round(tot.mobile/sum*100));
+        setTablet(Math.round(tot.tablet/sum*100));
+      }
+    }
+
+    // Período: detecta columna de fecha y usa el rango real de los datos subidos
+    const dateCol=findCol('fecha','date','día');
+    if(dateCol){
+      const vals=rows.map(r=>r[dateCol]).filter(Boolean).sort();
+      if(vals.length) setPeriodo(`${vals[0]} → ${vals[vals.length-1]}`);
+    }else{
+      setPeriodo('');
+    }
+  },[kpisCsv]);
+
+  // Wrapper del setter de kpisCsv: al quitar el CSV, limpia también los valores derivados
+  function setKpisCsvClean(v){
+    setKpisCsv(v);
+    if(!v){
+      setSesiones('');setTransacciones('');setIngresos('');setCvr('');setRebote('');setTicket('');setPeriodo('');
+    }
+  }
+
+  function StatChip({label,value,suffix}){
+    return(
+      <div style={{background:'#0A0A18',borderRadius:'8px',padding:'10px 12px'}}>
+        <p style={{fontSize:'10px',color:C.txtDim,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'4px'}}>{label}</p>
+        <p style={{fontSize:'15px',fontWeight:600,color:C.txt}}>{value?`${value}${suffix||''}`:'—'}</p>
+      </div>
+    );
+  }
 
   // Step 1 — Comportamiento
   const [exp1,setExp1]=useState(initial?.exp1Data||null);
@@ -501,16 +618,35 @@ function CreateProject({onSave, onCancel, initial}){
   const [exp3,setExp3]=useState(initial?.exp3Data||null);
   const ref1=useRef(),ref2=useRef(),ref3=useRef();
 
-  // Step 2 — Adquisición
-  const [canales,setCanales]=useState(initial?.canales||[{canal:'',pct:''},{canal:'',pct:''},{canal:'',pct:''}]);
+  // Step 2 — Contexto usuario (antes "Adquisición")
+  const canales=initial?.canales||[]; // se conserva solo para compatibilidad con la vista de detalle
   const [nuevos,setNuevos]=useState(initial?.kpis?.nuevos||60);
   const [canalConversion,setCanalConversion]=useState(initial?.canalConversion||'');
+  const [busquedaCsv,setBusquedaCsv]=useState(initial?.busquedaCsv||null);
+  const refBusqueda=useRef();
+  const [vozCsv,setVozCsv]=useState(initial?.vozCsv||null);
+  const refVoz=useRef();
 
-  // Step 3 — Funnel
+  // Funnel cualitativo — capturas por tipo de página
+  const PAGINAS_FUNNEL=['Home','Listado','Página de producto','Carrito','Landing de ofertas','Otras landings'];
+  const [funnelQualImgs,setFunnelQualImgs]=useState(initial?.funnelQualImgs||{});
+  const [checkoutSteps,setCheckoutSteps]=useState(initial?.checkoutSteps||[{id:1,nombre:'Paso 1'},{id:2,nombre:'Paso 2'},{id:3,nombre:'Paso 3'}]);
+  const [checkoutStepImgs,setCheckoutStepImgs]=useState(initial?.checkoutStepImgs||{});
+  const [openPagina,setOpenPagina]=useState(null);
+
+  // Step 3 — Funnel (datos cuantitativos)
   const [tipoCompra,setTipoCompra]=useState(initial?.kpis?.tipoCompra||'mixta');
   const [ticketMedio,setTicketMedio]=useState(initial?.kpis?.ticket||'');
   const [abandonoPrincipal,setAbandonoPrincipal]=useState(initial?.abandonoPrincipal||'');
   const [pasosFunnel,setPasosFunnel]=useState(initial?.pasosFunnel||'');
+  const [funnelVolCsv,setFunnelVolCsv]=useState(initial?.funnelVolCsv||null);
+  const refFunnelVol=useRef();
+  const [funnelVolImg,setFunnelVolImg]=useState(initial?.funnelVolImg||null);
+  const refFunnelVolImg=useRef();
+  const [funnelDispCsv,setFunnelDispCsv]=useState(initial?.funnelDispCsv||null);
+  const refFunnelDisp=useRef();
+  const [funnelDispImg,setFunnelDispImg]=useState(initial?.funnelDispImg||null);
+  const refFunnelDispImg=useRef();
 
   // Step 4 — Negocio
   const [descripcion,setDescripcion]=useState(initial?.descripcion||'');
@@ -533,14 +669,109 @@ function CreateProject({onSave, onCancel, initial}){
     return Math.min(s,100);
   }
 
-  function handleFile(f,setter){
+  function handleFile(f,setter,key){
     if(!f) return;
     const r=new FileReader();
-    r.onload=e=>{const p=parseCSV(e.target.result);if(p) setter({...p,fileName:f.name});};
+    r.onload=e=>{const p=parseCSV(e.target.result);if(p){setter({...p,fileName:f.name});if(key) touch(key);}};
     r.readAsText(f,'UTF-8');
   }
 
-  function CSVBox({parsed,refEl,setter,label,hint,tutorial,required}){
+  // Caja genérica: CSV obligatorio o preferente, con captura de imagen como alternativa (Looker, PDF, etc.)
+  function DataBox({parsedCsv,refCsv,setterCsv,imgVal,refImg,setterImg,label,hint,tutorial,required,k}){
+    const [showTip,setShowTip]=useState(false);
+    function onImg(f){ if(!f) return; setterImg(f.name); if(k) touch(k); }
+    return(
+      <div style={{marginBottom:'14px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}}>
+          <label style={T.label}>{label}{required&&<span style={{color:C.red}}> *</span>}</label>
+          {tutorial&&<button onClick={()=>setShowTip(!showTip)} style={{fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer'}}>
+            {showTip?'Ocultar tutorial':'¿Cómo exportarlo?'}
+          </button>}
+        </div>
+        {showTip&&<div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px',marginBottom:'10px',fontSize:'12px',color:C.txtMid,lineHeight:'1.8'}}>{tutorial}</div>}
+        <div style={{display:'grid',gridTemplateColumns:refImg?'1fr 1fr':'1fr',gap:'8px'}}>
+          {parsedCsv?(
+            <div style={{border:`1.5px solid ${C.green}`,borderRadius:'10px',padding:'10px 12px',background:C.greenDim,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div style={{overflow:'hidden'}}>
+                <p style={{fontSize:'12px',fontWeight:600,color:C.green,marginBottom:'2px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{parsedCsv.fileName}</p>
+                <p style={{fontSize:'10px',color:C.txtDim}}>CSV guardado</p>
+              </div>
+              <div style={{display:'flex',gap:'6px'}}>
+                <button onClick={()=>refCsv.current.click()} style={{fontSize:'10px',color:C.accent,background:'none',border:`1px solid ${C.accent}`,borderRadius:'6px',padding:'3px 8px',cursor:'pointer'}}>Reemplazar</button>
+                <button onClick={()=>setterCsv(null)} style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer'}}>✕</button>
+              </div>
+              <input ref={refCsv} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setterCsv,k)}/>
+            </div>
+          ):(
+            <div onClick={()=>refCsv.current.click()} style={{border:`1.5px dashed ${C.border}`,borderRadius:'10px',padding:'14px',textAlign:'center',cursor:'pointer',background:'#070713'}}>
+              <input ref={refCsv} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setterCsv,k)}/>
+              <div style={{fontSize:'16px',marginBottom:'4px'}}>📊</div>
+              <p style={{fontSize:'12px',color:C.txtDim}}>Subir CSV</p>
+            </div>
+          )}
+          {refImg&&(imgVal?(
+            <div style={{border:`1.5px solid ${C.green}`,borderRadius:'10px',padding:'10px 12px',background:C.greenDim,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div style={{overflow:'hidden'}}>
+                <p style={{fontSize:'12px',fontWeight:600,color:C.green,marginBottom:'2px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{imgVal}</p>
+                <p style={{fontSize:'10px',color:C.txtDim}}>Captura guardada</p>
+              </div>
+              <div style={{display:'flex',gap:'6px'}}>
+                <button onClick={()=>refImg.current.click()} style={{fontSize:'10px',color:C.accent,background:'none',border:`1px solid ${C.accent}`,borderRadius:'6px',padding:'3px 8px',cursor:'pointer'}}>Reemplazar</button>
+                <button onClick={()=>setterImg(null)} style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer'}}>✕</button>
+              </div>
+              <input ref={refImg} type='file' accept='.jpg,.jpeg,.png,.webp,.pdf' style={{display:'none'}} onChange={e=>onImg(e.target.files[0])}/>
+            </div>
+          ):(
+            <div onClick={()=>refImg.current.click()} style={{border:`1.5px dashed ${C.border}`,borderRadius:'10px',padding:'14px',textAlign:'center',cursor:'pointer',background:'#070713'}}>
+              <input ref={refImg} type='file' accept='.jpg,.jpeg,.png,.webp,.pdf' style={{display:'none'}} onChange={e=>onImg(e.target.files[0])}/>
+              <div style={{fontSize:'16px',marginBottom:'4px'}}>🖼</div>
+              <p style={{fontSize:'12px',color:C.txtDim}}>O subir captura</p>
+            </div>
+          ))}
+        </div>
+        {hint&&<p style={{...T.small,marginTop:'6px'}}>{hint}</p>}
+      </div>
+    );
+  }
+
+  // Caja pequeña para una sola imagen (heatmaps, scroll, frustración por página/paso)
+  function MiniImgBox({label,val,setter,refEl,k}){
+    return(
+      <div>
+        <p style={{fontSize:'11px',color:C.txtDim,marginBottom:'5px'}}>{label}</p>
+        <div onClick={()=>refEl.current.click()}
+          style={{border:`1.5px dashed ${val?C.green:C.border}`,borderRadius:'8px',padding:'10px',textAlign:'center',cursor:'pointer',background:val?C.greenDim:'#070713',minHeight:'56px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+          <input ref={refEl} type='file' accept='.jpg,.jpeg,.png,.webp' style={{display:'none'}}
+            onChange={e=>{if(e.target.files[0]){setter(e.target.files[0].name);if(k) touch(k);}}}/>
+          <span style={{fontSize:'14px'}}>{val?'✓':'🖼'}</span>
+          <p style={{fontSize:'10px',color:val?C.green:C.txtDim,marginTop:'2px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:'100%'}}>{val||'Subir'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Previsualización genérica de un CSV parseado (usado en los bloques de Funnel cuantitativo)
+  function CsvTable({parsed}){
+    if(!parsed||!parsed.rows||!parsed.rows.length) return null;
+    const cols=parsed.headers.slice(0,5);
+    return(
+      <div style={{overflowX:'auto',marginTop:'10px'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px'}}>
+          <thead>
+            <tr>{cols.map(c=><th key={c} style={{textAlign:'left',padding:'6px 8px',color:C.txtDim,fontWeight:400,borderBottom:`1px solid ${C.border}`}}>{c}</th>)}</tr>
+          </thead>
+          <tbody>
+            {parsed.rows.slice(0,8).map((r,i)=>(
+              <tr key={i}>{cols.map(c=><td key={c} style={{padding:'6px 8px',color:C.txt,borderBottom:`1px solid ${C.border}`}}>{r[c]}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+        {parsed.rows.length>8&&<p style={{...T.small,marginTop:'4px'}}>+ {parsed.rows.length-8} filas más</p>}
+      </div>
+    );
+  }
+
+  function CSVBox({parsed,refEl,setter,label,hint,tutorial,required,k}){
     const [showTip,setShowTip]=useState(false);
     const isSaved = parsed&&parsed.rows&&parsed.rows.length===0; // restored from save, no rows
     return(
@@ -572,12 +803,12 @@ function CreateProject({onSave, onCancel, initial}){
               <button onClick={()=>setter(null)}
                 style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer'}}>✕</button>
             </div>
-            <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter)}/>
+            <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter,k)}/>
           </div>
         ):(
           <div onClick={()=>refEl.current.click()}
             style={{border:`1.5px dashed ${C.border}`,borderRadius:'10px',padding:'16px',textAlign:'center',cursor:'pointer',background:'#070713'}}>
-            <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter)}/>
+            <input ref={refEl} type='file' accept='.csv,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setter,k)}/>
             <div style={{fontSize:'18px',marginBottom:'5px'}}>📊</div>
             <p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV o haz clic para subir</p>
             <p style={{...T.small,marginTop:'3px'}}>{hint}</p>
@@ -592,12 +823,45 @@ function CreateProject({onSave, onCancel, initial}){
     );
   }
 
-  function handleSave(){
+  // Genera "Comportamiento detectado" + "Oportunidad" para cada bloque que tenga datos.
+  // Se ejecuta una sola vez al guardar (no por cada subida) para minimizar llamadas a la API.
+  async function generarInsights(){
+    const bloques={
+      kpis: (cvr&&sesiones)||kpisCsv? `CVR ${cvr}%, sesiones ${sesiones}, rebote ${rebote}%, ticket ${ticket}, dispositivos desktop ${desktop}% / mobile ${mobile}% / tablet ${tablet}%.${kpisCsv?` CSV original — columnas: ${kpisCsv.headers.join(', ')}.`:''}`:null,
+      exp1: exp1? `Columnas: ${(exp1.headers||[]).join(', ')}. Filas de ejemplo: ${JSON.stringify((exp1.rows||[]).slice(0,15))}`:null,
+      exp2: exp2? `Columnas: ${(exp2.headers||[]).join(', ')}. Filas de ejemplo: ${JSON.stringify((exp2.rows||[]).slice(0,15))}`:null,
+      exp3: exp3? `Columnas: ${(exp3.headers||[]).join(', ')}. Filas de ejemplo: ${JSON.stringify((exp3.rows||[]).slice(0,15))}`:null,
+      busqueda: busquedaCsv? `Columnas: ${(busquedaCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((busquedaCsv.rows||[]).slice(0,15))}`:null,
+      voz: vozCsv? `Columnas: ${(vozCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((vozCsv.rows||[]).slice(0,15))}`:null,
+      funnelQual: Object.keys(funnelQualImgs).length||Object.keys(checkoutStepImgs).length? `Capturas subidas para: ${Object.keys(funnelQualImgs).join(', ')}${checkoutSteps.length?', Checkout ('+checkoutSteps.map(s=>s.nombre).join(', ')+')':''}.`:null,
+      funnelVol: funnelVolCsv? `Columnas: ${(funnelVolCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((funnelVolCsv.rows||[]).slice(0,20))}`:null,
+      funnelDisp: funnelDispCsv? `Columnas: ${(funnelDispCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((funnelDispCsv.rows||[]).slice(0,20))}`:null,
+      crm: crmCsv? `Columnas: ${(crmCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((crmCsv.rows||[]).slice(0,20))}`:null,
+    };
+    const activos=Object.entries(bloques).filter(([,v])=>v);
+    if(!apiKey||activos.length===0) return;
+    setSavingAI(true);
+    try{
+      const prompt=`Eres un analista CRO. Para cada uno de estos bloques de datos de un ecommerce de sector "${sector}", periodo "${periodo||'no especificado'}", devuelve un comportamiento detectado (1 frase concreta, con cifras si las hay) y una oportunidad accionable (1 frase). Bloques:\n\n${activos.map(([k,v])=>`### ${k}\n${v}`).join('\n\n')}\n\nResponde SOLO con un JSON así, una entrada por cada bloque listado arriba, usando exactamente esas claves: {"kpis":{"comportamiento":"...","oportunidad":"..."}, ...}`;
+      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido, sin markdown ni texto extra.');
+      const parsed=JSON.parse(raw.replace(/```json/g,'').replace(/```/g,'').trim());
+      setInsights(prev=>({...prev,...parsed}));
+    }catch(e){
+      console.error('No se pudieron generar los insights:',e);
+    }finally{
+      setSavingAI(false);
+    }
+  }
+
+  async function handleSave(){
+    await generarInsights();
     onSave({
       id:initial?.id||('p'+Date.now()),
       name,domain,sector,periodo,
       createdAt:initial?.createdAt||new Date().toISOString().slice(0,10),
       quality:score(),
+      kpisCsv:kpisCsv?{fileName:kpisCsv.fileName,headers:kpisCsv.headers,rows:kpisCsv.rows||[]}:null,
+      kpisImg,
       kpis:{cvr,ticket,transacciones,trafico:sesiones,ingresos,rebote,desktop,mobile,tablet,tipoCompra,recurrentes:100-nuevos,nuevos},
       canales:canales.filter(c=>c.canal),
       canalConversion,
@@ -605,9 +869,17 @@ function CreateProject({onSave, onCancel, initial}){
       descripcion,negocioRespuestas,
       crm:{tipo:crmSeleccionado,csv:crmCsv?crmCsv.fileName:null},
       exp1:!!exp1,exp2:!!exp2,exp3:!!exp3,
-      exp1Data:exp1?{fileName:exp1.fileName,headers:exp1.headers,rows:[]}:null,
-      exp2Data:exp2?{fileName:exp2.fileName,headers:exp2.headers,rows:[]}:null,
-      exp3Data:exp3?{fileName:exp3.fileName,headers:exp3.headers,rows:[]}:null,
+      exp1Data:exp1?{fileName:exp1.fileName,headers:exp1.headers,rows:exp1.rows||[]}:null,
+      exp2Data:exp2?{fileName:exp2.fileName,headers:exp2.headers,rows:exp2.rows||[]}:null,
+      exp3Data:exp3?{fileName:exp3.fileName,headers:exp3.headers,rows:exp3.rows||[]}:null,
+      busquedaCsv:busquedaCsv?{fileName:busquedaCsv.fileName,headers:busquedaCsv.headers,rows:busquedaCsv.rows||[]}:null,
+      vozCsv:vozCsv?{fileName:vozCsv.fileName,headers:vozCsv.headers,rows:vozCsv.rows||[]}:null,
+      funnelQualImgs,checkoutSteps,checkoutStepImgs,
+      funnelVolCsv:funnelVolCsv?{fileName:funnelVolCsv.fileName,headers:funnelVolCsv.headers,rows:funnelVolCsv.rows||[]}:null,
+      funnelVolImg,
+      funnelDispCsv:funnelDispCsv?{fileName:funnelDispCsv.fileName,headers:funnelDispCsv.headers,rows:funnelDispCsv.rows||[]}:null,
+      funnelDispImg,
+      timestamps,insights,
       tests:initial?.tests||[]
     });
   }
@@ -658,40 +930,51 @@ function CreateProject({onSave, onCancel, initial}){
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
               <Select label='Sector' value={sector} onChange={setSector} options={SECTORES}/>
-              <Input label='Período de los datos' value={periodo} onChange={setPeriodo} placeholder='Ej: Últimos 90 días / Ene-Mar 2025'/>
             </div>
           </Card>
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'4px'}}>KPIs principales</p>
-            <p style={{...T.small,marginBottom:'14px'}}>Introduce los valores del período seleccionado</p>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px',marginBottom:'12px'}}>
-              <Input label='Sesiones totales' value={sesiones} onChange={setSesiones} placeholder='Ej: 450.000' required/>
-              <Input label='Transacciones' value={transacciones} onChange={setTransacciones} placeholder='Ej: 8.200'/>
-              <Input label='Ingresos' value={ingresos} onChange={setIngresos} placeholder='Ej: 1.240.000€'/>
-              <Input label='Tasa de conversión (%)' value={cvr} onChange={setCvr} placeholder='Ej: 1.82%' required/>
-              <Input label='Tasa de rebote (%)' value={rebote} onChange={setRebote} placeholder='Ej: 54%'/>
-              <Input label='Ticket medio' value={ticket} onChange={setTicket} placeholder='Ej: 151€' required/>
-            </div>
-            <p style={{...T.label,marginBottom:'8px'}}>Sesiones por dispositivo</p>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px'}}>
-              <div>
-                <label style={{...T.small,display:'block',marginBottom:'4px'}}>Desktop %</label>
-                <input type='number' value={desktop} onChange={e=>setDesktop(Number(e.target.value))} style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
-              </div>
-              <div>
-                <label style={{...T.small,display:'block',marginBottom:'4px'}}>Mobile %</label>
-                <input type='number' value={mobile} onChange={e=>setMobile(Number(e.target.value))} style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
-              </div>
-              <div>
-                <label style={{...T.small,display:'block',marginBottom:'4px'}}>Tablet %</label>
-                <input type='number' value={tablet} onChange={e=>setTablet(Number(e.target.value))} style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
-              </div>
-            </div>
+            <CardHeader title='KPIs principales' k='kpis'/>
+            <p style={{...T.small,marginBottom:'14px'}}>Los KPIs se leen del CSV subido — nada de valores manuales que puedan quedar desfasados. Período recomendado: últimos 90 días (o última temporada cerrada si el sector es estacional).</p>
+            <DataBox parsedCsv={kpisCsv} refCsv={refKpis} setterCsv={setKpisCsvClean} k='kpis'
+              label='CSV de KPIs generales' hint='Métricas: Sesiones, Transacciones, Ingresos, Tasa de conversión, Tasa de rebote, Ingresos por transacción'
+              tutorial={<span>1. GA4 → <b>Explorar → Exploración en blanco</b><br/>2. Dimensión (opcional): Fecha (para detectar el período) y/o Categoría de dispositivo (para el desglose)<br/>3. Métricas: Sesiones · Transacciones · Ingresos · Tasa de conversión · Tasa de rebote · Ingresos por transacción<br/>4. Período que quieras analizar → Exportar CSV</span>}
+              imgVal={kpisImg} refImg={refKpisImg} setterImg={setKpisImg}
+            />
+            {kpisCsv?(
+              <>
+                <CsvTable parsed={kpisCsv}/>
+                {periodo
+                  ? <p style={{...T.small,color:C.green,marginTop:'8px'}}>📅 Período detectado en el CSV: {periodo}</p>
+                  : <p style={{...T.small,marginTop:'8px'}}>⚠ No se detectó una columna de fecha para calcular el período automáticamente.</p>}
+                <p style={{...T.label,margin:'14px 0 6px'}}>Valores leídos</p>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px',marginBottom:'10px'}}>
+                  <StatChip label='Sesiones totales' value={sesiones}/>
+                  <StatChip label='Transacciones' value={transacciones}/>
+                  <StatChip label='Ingresos' value={ingresos}/>
+                  <StatChip label='Tasa de conversión' value={cvr} suffix='%'/>
+                  <StatChip label='Tasa de rebote' value={rebote} suffix='%'/>
+                  <StatChip label='Ticket medio' value={ticket}/>
+                </div>
+                {(desktop||mobile||tablet)&&kpisCsv.headers.some(h=>['dispositivo','device'].some(k=>h.toLowerCase().includes(k)))&&(
+                  <>
+                    <p style={{...T.label,margin:'10px 0 6px'}}>Sesiones por dispositivo (detectado en el CSV)</p>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px'}}>
+                      <StatChip label='Desktop' value={desktop} suffix='%'/>
+                      <StatChip label='Mobile' value={mobile} suffix='%'/>
+                      <StatChip label='Tablet' value={tablet} suffix='%'/>
+                    </div>
+                  </>
+                )}
+              </>
+            ):(
+              <p style={{...T.small,textAlign:'center',padding:'18px 0'}}>Sube el CSV para ver los KPIs de este proyecto.</p>
+            )}
+            <InsightBlock k='kpis'/>
           </Card>
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
               <Btn disabled={!name||!domain||!cvr||!sesiones||!ticket} onClick={()=>setSub(1)}>Siguiente →</Btn>
             </div>
           </div>
@@ -702,176 +985,147 @@ function CreateProject({onSave, onCancel, initial}){
       {sub===1&&(
         <div>
           <Card style={{marginBottom:'12px',border:`1px solid ${C.accent}`}}>
-            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
-              <Tag color='purple'>Obligatorio</Tag>
-              <p style={T.h3}>Exp 1 — Quién es el usuario</p>
-            </div>
-            <p style={{...T.body,marginBottom:'14px'}}>Define los arquetipos base. Sin esto no se pueden generar perfiles fiables.</p>
-            <CSVBox parsed={exp1} refEl={ref1} setter={setExp1} required
+            <CardHeader title='Exp 1 — Quién es el usuario' k='exp1' tag={<Tag color='purple'>Obligatorio</Tag>}/>
+            <p style={{...T.body,marginBottom:'14px'}}>Define los arquetipos base. Sin esto no se pueden generar perfiles fiables. Período recomendado: 6-12 meses.</p>
+            <CSVBox parsed={exp1} refEl={ref1} setter={setExp1} required k='exp1'
               label='CSV de la Exploración 1'
               hint='Dimensiones: País, Ciudad, Edad, Género, Tipo usuario, Dispositivo · Métricas: Sesiones, Conversiones, CVR'
               tutorial={<span>1. GA4 → <b>Explorar → Exploración en blanco</b><br/>2. Dimensiones (filas): País · Ciudad · Edad · Género · Idioma<br/>3. Dimensiones (columnas): Tipo usuario · Dispositivo<br/>4. Métricas: Usuarios activos · Sesiones · Conversiones · CVR<br/>5. Últimos 90 días → Exportar CSV</span>}
             />
+            <InsightBlock k='exp1'/>
           </Card>
           <Card style={{marginBottom:'12px'}}>
-            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
-              <Tag color='amber'>Opcional +10%</Tag>
-              <p style={T.h3}>Exp 2 — Cómo llega y de dónde viene</p>
-            </div>
-            <p style={{...T.body,marginBottom:'14px'}}>Contexto mental de entrada por canal, fuente y campaña.</p>
-            <CSVBox parsed={exp2} refEl={ref2} setter={setExp2}
+            <CardHeader title='Exp 2 — Cómo llega y de dónde viene' k='exp2' tag={<Tag color='amber'>Opcional +10%</Tag>}/>
+            <p style={{...T.body,marginBottom:'14px'}}>Contexto mental de entrada por canal, fuente y campaña. Período recomendado: últimos 90 días.</p>
+            <CSVBox parsed={exp2} refEl={ref2} setter={setExp2} k='exp2'
               label='CSV de la Exploración 2'
-              hint='Dimensiones: Canal, Fuente/Medio, Campaña, Página destino · Métricas: Sesiones, CVR, Duración'
-              tutorial={<span>1. GA4 → <b>Explorar → Exploración en blanco</b><br/>2. Dimensiones (filas): Canal de sesión · Fuente/Medio · Campaña<br/>3. Dimensiones (columnas): Tipo usuario · Dispositivo<br/>4. Métricas: Sesiones · CVR · Duración media · Conversiones<br/>5. Últimos 90 días → Exportar CSV</span>}
+              hint='Dimensiones: Canal, Fuente/Medio, Campaña, Página destino · Métricas: Sesiones, CVR, Duración, Tasa de rebote, Sesiones con interacción'
+              tutorial={<span>1. GA4 → <b>Explorar → Exploración en blanco</b><br/>2. Dimensiones (filas): Canal de sesión · Fuente/Medio · Campaña<br/>3. Dimensiones (columnas): Tipo usuario · Dispositivo<br/>4. Métricas: Sesiones · CVR · Duración media · Conversiones · Tasa de rebote · Sesiones con interacción<br/>5. Últimos 90 días → Exportar CSV</span>}
             />
+            <InsightBlock k='exp2'/>
           </Card>
           <Card style={{marginBottom:'12px'}}>
-            <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
-              <Tag color='amber'>Opcional +10%</Tag>
-              <p style={T.h3}>Exp 3 — Cómo navega y qué hace dentro</p>
-            </div>
-            <p style={{...T.body,marginBottom:'14px'}}>Rutas reales por segmento. Diferencias entre conversor y no conversor.</p>
-            <CSVBox parsed={exp3} refEl={ref3} setter={setExp3}
+            <CardHeader title='Exp 3 — Cómo navega y qué hace dentro' k='exp3' tag={<Tag color='amber'>Opcional +10%</Tag>}/>
+            <p style={{...T.body,marginBottom:'14px'}}>Rutas reales por segmento. Diferencias entre conversor y no conversor. Período recomendado: últimos 90 días (mínimo).</p>
+            <CSVBox parsed={exp3} refEl={ref3} setter={setExp3} k='exp3'
               label='CSV de la Exploración 3'
               hint='Exploración de rutas filtrada por segmento (canal, dispositivo, conversores)'
               tutorial={<span>1. GA4 → <b>Explorar → Exploración de rutas</b><br/>2. Nodo inicio: Página de destino<br/>3. Dimensiones: Título página · Nombre evento · Búsqueda interna<br/>4. Aplica segmentos: Por canal · Por dispositivo · Por conversores<br/>5. Exportar CSV</span>}
             />
+            <InsightBlock k='exp3'/>
           </Card>
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(0)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
               <Btn disabled={!exp1} onClick={()=>setSub(2)}>Siguiente →</Btn>
             </div>
           </div>
         </div>
       )}
 
-      {/* STEP 2 — Adquisición */}
+      {/* STEP 2 — Contexto usuario */}
       {sub===2&&(
         <div>
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'14px'}}>Canales de adquisición</p>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
-              <p style={T.body}>Hasta 4 canales principales con su % de tráfico</p>
-              {canales.length<4&&<button style={{fontSize:'11px',color:C.accent,background:'none',border:'none',cursor:'pointer'}} onClick={()=>setCanales([...canales,{canal:'',pct:''}])}>+ Añadir</button>}
-            </div>
-            {canales.map((c,i)=>(
-              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 80px 32px',gap:'8px',marginBottom:'8px',alignItems:'center'}}>
-                <select value={c.canal} onChange={e=>{const n=[...canales];n[i]={...n[i],canal:e.target.value};setCanales(n);}}
-                  style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:c.canal?C.txt:C.txtDim,fontSize:'13px',outline:'none'}}>
-                  <option value=''>Seleccionar canal...</option>
-                  <optgroup label='— Búsqueda'>
-                    <option>Orgánico / SEO</option>
-                    <option>Paid Search / SEM (Google Ads)</option>
-                    <option>Paid Search / SEM (Bing Ads)</option>
-                    <option>Tráfico de IA (ChatGPT, Perplexity, Gemini...)</option>
-                  </optgroup>
-                  <optgroup label='— Shopping'>
-                    <option>Paid Shopping (Google Shopping)</option>
-                    <option>Marketplace (Amazon, El Corte Inglés...)</option>
-                  </optgroup>
-                  <optgroup label='— Social pagado'>
-                    <option>Paid Social (Meta Ads)</option>
-                    <option>Paid Social (TikTok Ads)</option>
-                    <option>Paid Social (LinkedIn Ads)</option>
-                    <option>Paid Social (Pinterest Ads)</option>
-                    <option>Paid Social (YouTube Ads)</option>
-                    <option>Paid Social (X / Twitter Ads)</option>
-                  </optgroup>
-                  <optgroup label='— Social orgánico'>
-                    <option>Social orgánico (Instagram)</option>
-                    <option>Social orgánico (TikTok)</option>
-                    <option>Social orgánico (LinkedIn)</option>
-                    <option>Social orgánico (YouTube)</option>
-                    <option>Social orgánico (Pinterest)</option>
-                    <option>Social orgánico (X / Twitter)</option>
-                  </optgroup>
-                  <optgroup label='— Email y CRM'>
-                    <option>Email / Newsletter</option>
-                    <option>Email transaccional</option>
-                    <option>SMS / WhatsApp</option>
-                    <option>Push notifications</option>
-                  </optgroup>
-                  <optgroup label='— Referral y afiliados'>
-                    <option>Referral (webs externas)</option>
-                    <option>Afiliados</option>
-                    <option>Influencers / Colaboraciones</option>
-                    <option>Prensa / PR</option>
-                  </optgroup>
-                  <optgroup label='— Otros'>
-                    <option>Directo</option>
-                    <option>Display / Programática</option>
-                    <option>Retargeting / Remarketing</option>
-                    <option>QR / Offline</option>
-                  </optgroup>
-                </select>
-                <input type='number' placeholder='%' value={c.pct} onChange={e=>{const n=[...canales];n[i]={...n[i],pct:e.target.value};setCanales(n);}}
-                  style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 10px',color:C.txt,fontSize:'13px',outline:'none',textAlign:'center'}}/>
-                <button onClick={()=>setCanales(canales.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:C.txtDim,cursor:'pointer',fontSize:'14px'}}>✕</button>
-              </div>
-            ))}
-          </Card>
-          <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'14px'}}>Usuarios nuevos vs recurrentes</p>
+            <CardHeader title='Usuarios nuevos vs recurrentes' k='nuevos'/>
+            <p style={{...T.small,marginBottom:'10px'}}>No suele venir claro en el CSV de canales — percepción del cliente.</p>
             <label style={{...T.label,display:'block',marginBottom:'6px'}}>% Usuarios nuevos: <span style={{color:C.accent,fontWeight:700}}>{nuevos}%</span> · Recurrentes: {100-nuevos}%</label>
-            <input type='range' min='0' max='100' step='5' value={nuevos} onChange={e=>setNuevos(Number(e.target.value))} style={{width:'100%',accentColor:C.accent}}/>
+            <input type='range' min='0' max='100' step='5' value={nuevos} onChange={e=>{setNuevos(Number(e.target.value));touch('nuevos');}} style={{width:'100%',accentColor:C.accent}}/>
           </Card>
+
           <Card style={{marginBottom:'12px'}}>
-            <label style={{...T.label,display:'block',marginBottom:'6px'}}>Canal con mayor tasa de conversión</label>
-            <select value={canalConversion} onChange={e=>setCanalConversion(e.target.value)}
-              style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
-              <option value=''>No lo sé</option>
-              <optgroup label='— Búsqueda'>
-                <option>Orgánico / SEO</option>
-                <option>Paid Search / SEM (Google Ads)</option>
-                <option>Paid Search / SEM (Bing Ads)</option>
-                <option>Tráfico de IA (ChatGPT, Perplexity, Gemini...)</option>
-              </optgroup>
-              <optgroup label='— Shopping'>
-                <option>Paid Shopping (Google Shopping)</option>
-                <option>Marketplace (Amazon, El Corte Inglés...)</option>
-              </optgroup>
-              <optgroup label='— Social pagado'>
-                <option>Paid Social (Meta Ads)</option>
-                <option>Paid Social (TikTok Ads)</option>
-                <option>Paid Social (LinkedIn Ads)</option>
-                <option>Paid Social (Pinterest Ads)</option>
-                <option>Paid Social (YouTube Ads)</option>
-                <option>Paid Social (X / Twitter Ads)</option>
-              </optgroup>
-              <optgroup label='— Social orgánico'>
-                <option>Social orgánico (Instagram)</option>
-                <option>Social orgánico (TikTok)</option>
-                <option>Social orgánico (LinkedIn)</option>
-                <option>Social orgánico (YouTube)</option>
-                <option>Social orgánico (Pinterest)</option>
-                <option>Social orgánico (X / Twitter)</option>
-              </optgroup>
-              <optgroup label='— Email y CRM'>
-                <option>Email / Newsletter</option>
-                <option>Email transaccional</option>
-                <option>SMS / WhatsApp</option>
-                <option>Push notifications</option>
-              </optgroup>
-              <optgroup label='— Referral y afiliados'>
-                <option>Referral (webs externas)</option>
-                <option>Afiliados</option>
-                <option>Influencers / Colaboraciones</option>
-                <option>Prensa / PR</option>
-              </optgroup>
-              <optgroup label='— Otros'>
-                <option>Directo</option>
-                <option>Display / Programática</option>
-                <option>Retargeting / Remarketing</option>
-                <option>QR / Offline</option>
-              </optgroup>
-            </select>
+            <CardHeader title='Búsqueda interna del sitio' k='busqueda' tag={<Tag color='amber'>Opcional</Tag>}/>
+            <p style={{...T.body,marginBottom:'10px'}}>Qué escribe la gente en el buscador — la señal más directa de intención y nivel de consciencia. Período recomendado: últimos 30-90 días.</p>
+            <DataBox parsedCsv={busquedaCsv} refCsv={refBusqueda} setterCsv={setBusquedaCsv} k='busqueda'
+              label='CSV de búsqueda interna' hint='Columnas: término buscado, nº búsquedas, CVR tras búsqueda'
+              tutorial={<span>GA4 → Informes → Interacción → <b>Búsqueda en el sitio</b> → Exportar CSV</span>}
+              imgVal={null} refImg={null} setterImg={()=>{}}
+            />
+            <InsightBlock k='busqueda'/>
           </Card>
+
+          <Card style={{marginBottom:'12px'}}>
+            <CardHeader title='Voz del cliente' k='voz' tag={<Tag color='amber'>Opcional</Tag>}/>
+            <p style={{...T.body,marginBottom:'10px'}}>Reseñas o tickets de soporte — objeciones reales con su lenguaje literal. Período recomendado: últimos 6-12 meses.</p>
+            <DataBox parsedCsv={vozCsv} refCsv={refVoz} setterCsv={setVozCsv} k='voz'
+              label='CSV de reseñas o tickets' hint='Columnas: fecha, texto, valoración (si aplica)'
+              imgVal={null} refImg={null} setterImg={()=>{}}
+            />
+            <InsightBlock k='voz'/>
+          </Card>
+
+          <Card style={{marginBottom:'12px'}}>
+            <CardHeader title='Funnel — capturas por tipo de página' k='funnelQual'/>
+            <p style={{...T.body,marginBottom:'12px'}}>Sube, por cada tipo de página, el heatmap de clics, el mapa de scroll y las señales de frustración (rage clicks, dead clicks, quick backs). Período recomendado: últimos 30-60 días.</p>
+
+            {PAGINAS_FUNNEL.map(pg=>{
+              const imgs=funnelQualImgs[pg]||{};
+              const open=openPagina===pg;
+              return(
+                <div key={pg} style={{border:`1px solid ${C.border}`,borderRadius:'8px',marginBottom:'8px',overflow:'hidden'}}>
+                  <div onClick={()=>setOpenPagina(open?null:pg)}
+                    style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 14px',cursor:'pointer',background:'#0F0F1C'}}>
+                    <span style={{fontSize:'13px',color:C.txt}}>{pg}</span>
+                    <span style={{fontSize:'11px',color:C.txtDim}}>{open?'▲':'▼'}</span>
+                  </div>
+                  {open&&(
+                    <div style={{padding:'12px 14px',display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px'}}>
+                      <MiniImgBox label='Heatmap de clics' val={imgs.heatmapClics} refEl={React.createRef()} k='funnelQual'
+                        setter={v=>setFunnelQualImgs(prev=>({...prev,[pg]:{...prev[pg],heatmapClics:v}}))}/>
+                      <MiniImgBox label='Mapa de scroll' val={imgs.mapaScroll} refEl={React.createRef()} k='funnelQual'
+                        setter={v=>setFunnelQualImgs(prev=>({...prev,[pg]:{...prev[pg],mapaScroll:v}}))}/>
+                      <MiniImgBox label='Señales de frustración' val={imgs.frustracion} refEl={React.createRef()} k='funnelQual'
+                        setter={v=>setFunnelQualImgs(prev=>({...prev,[pg]:{...prev[pg],frustracion:v}}))}/>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Checkout — pasos configurables */}
+            <div style={{border:`1px solid ${C.border}`,borderRadius:'8px',marginBottom:'8px',overflow:'hidden'}}>
+              <div onClick={()=>setOpenPagina(openPagina==='Checkout'?null:'Checkout')}
+                style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 14px',cursor:'pointer',background:'#0F0F1C'}}>
+                <span style={{fontSize:'13px',color:C.txt}}>Checkout <span style={{color:C.txtDim,fontSize:'11px'}}>· {checkoutSteps.length} pasos</span></span>
+                <span style={{fontSize:'11px',color:C.txtDim}}>{openPagina==='Checkout'?'▲':'▼'}</span>
+              </div>
+              {openPagina==='Checkout'&&(
+                <div style={{padding:'12px 14px'}}>
+                  <p style={{...T.small,marginBottom:'10px'}}>Cada ecommerce tiene su propio número de pasos de checkout. Sube solo los que existan en el tuyo.</p>
+                  {checkoutSteps.map((st,i)=>{
+                    const imgs=checkoutStepImgs[st.id]||{};
+                    return(
+                      <div key={st.id} style={{border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',marginBottom:'8px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}}>
+                          <span style={{width:'20px',height:'20px',borderRadius:'50%',background:C.accentDim,color:C.accent,fontSize:'11px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center'}}>{i+1}</span>
+                          <input value={st.nombre} onChange={e=>{const n=[...checkoutSteps];n[i]={...n[i],nombre:e.target.value};setCheckoutSteps(n);}}
+                            style={{flex:1,background:'#070713',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'6px 10px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+                          {checkoutSteps.length>1&&<button onClick={()=>setCheckoutSteps(checkoutSteps.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:C.txtDim,cursor:'pointer',fontSize:'13px'}}>✕</button>}
+                        </div>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px'}}>
+                          <MiniImgBox label='Heatmap de clics' val={imgs.heatmapClics} refEl={React.createRef()} k='funnelQual'
+                            setter={v=>setCheckoutStepImgs(prev=>({...prev,[st.id]:{...prev[st.id],heatmapClics:v}}))}/>
+                          <MiniImgBox label='Mapa de scroll' val={imgs.mapaScroll} refEl={React.createRef()} k='funnelQual'
+                            setter={v=>setCheckoutStepImgs(prev=>({...prev,[st.id]:{...prev[st.id],mapaScroll:v}}))}/>
+                          <MiniImgBox label='Señales de frustración' val={imgs.frustracion} refEl={React.createRef()} k='funnelQual'
+                            setter={v=>setCheckoutStepImgs(prev=>({...prev,[st.id]:{...prev[st.id],frustracion:v}}))}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button onClick={()=>setCheckoutSteps([...checkoutSteps,{id:Date.now(),nombre:`Paso ${checkoutSteps.length+1}`}])}
+                    style={{fontSize:'12px',color:C.accent,background:'none',border:'none',cursor:'pointer',padding:'6px 0'}}>+ Añadir paso</button>
+                </div>
+              )}
+            </div>
+            <InsightBlock k='funnelQual'/>
+          </Card>
+
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(1)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
               <Btn onClick={()=>setSub(3)}>Siguiente →</Btn>
             </div>
           </div>
@@ -882,36 +1136,33 @@ function CreateProject({onSave, onCancel, initial}){
       {sub===3&&(
         <div>
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'14px'}}>Tipo de compra</p>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px'}}>
-              {[{v:'impulsiva',label:'Impulsiva',desc:'Decisión rápida, emocional',icon:'⚡'},{v:'reflexiva',label:'Reflexiva',desc:'Investigan antes de comprar',icon:'🔍'},{v:'mixta',label:'Mixta',desc:'Depende del producto',icon:'⚖️'}].map(op=>(
-                <div key={op.v} onClick={()=>setTipoCompra(op.v)}
-                  style={{padding:'12px',borderRadius:'8px',border:`1px solid ${tipoCompra===op.v?C.accent:C.border}`,background:tipoCompra===op.v?C.accentDim:'transparent',cursor:'pointer',textAlign:'center'}}>
-                  <div style={{fontSize:'20px',marginBottom:'5px'}}>{op.icon}</div>
-                  <div style={{fontSize:'12px',fontWeight:600,color:tipoCompra===op.v?C.accent:C.txt,marginBottom:'2px'}}>{op.label}</div>
-                  <div style={{fontSize:'10px',color:C.txtDim}}>{op.desc}</div>
-                </div>
-              ))}
-            </div>
+            <CardHeader title='Pasos del funnel y volumen' k='funnelVol'/>
+            <p style={{...T.body,marginBottom:'10px'}}>La tasa de paso entre etapas importa más que el volumen absoluto: localiza el mayor cuello de botella. Período recomendado: últimos 90 días.</p>
+            <DataBox parsedCsv={funnelVolCsv} refCsv={refFunnelVol} setterCsv={setFunnelVolCsv} k='funnelVol'
+              label='CSV de la exploración de embudo' hint='Columnas: paso, usuarios/sesiones, % avanza, % abandono'
+              tutorial={<span>GA4 → <b>Explorar → Exploración de embudo</b> → define los pasos (Home, Listado, PDP, Carrito, Checkout...) → icono exportar → CSV. Si no tienes acceso, sube una captura de la exploración.</span>}
+              imgVal={funnelVolImg} refImg={refFunnelVolImg} setterImg={setFunnelVolImg}
+            />
+            <CsvTable parsed={funnelVolCsv}/>
+            <InsightBlock k='funnelVol'/>
           </Card>
+
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'14px'}}>Pasos del funnel</p>
-            <div style={{marginBottom:'12px'}}>
-              <label style={{...T.label,display:'block',marginBottom:'5px'}}>Principal punto de abandono</label>
-              <select value={abandonoPrincipal} onChange={e=>setAbandonoPrincipal(e.target.value)}
-                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}>
-                <option value=''>No lo sé</option>
-                <optgroup label='— Top of funnel'><option>Homepage — no encuentra lo que busca</option><option>Categoría — no filtra bien</option></optgroup>
-                <optgroup label='— Middle funnel'><option>Ficha de producto — falta información</option><option>Ficha de producto — precio o confianza</option></optgroup>
-                <optgroup label='— Bottom funnel'><option>Carrito — ve el total y sale</option><option>Checkout — proceso largo</option><option>Pago — sin método preferido</option></optgroup>
-              </select>
-            </div>
-            <Input label='Describe los pasos del funnel (opcional)' value={pasosFunnel} onChange={setPasosFunnel} placeholder='Ej: Homepage → Categoría → Ficha → Carrito → Checkout → Confirmación'/>
+            <CardHeader title='Funnel por dispositivo' k='funnelDisp'/>
+            <p style={{...T.body,marginBottom:'10px'}}>Un funnel global puede ocultar que un paso funciona bien en desktop y falla en mobile. Usa el mismo período que en "Pasos del funnel" para poder comparar.</p>
+            <DataBox parsedCsv={funnelDispCsv} refCsv={refFunnelDisp} setterCsv={setFunnelDispCsv} k='funnelDisp'
+              label='CSV desglosado por dispositivo' hint='Misma exploración + dimensión "Categoría de dispositivo" (mínimo Mobile / Desktop)'
+              tutorial={<span>GA4 → misma <b>Exploración de embudo</b> → añade la dimensión <b>Categoría de dispositivo</b> → exporta CSV desglosado, o sube una captura del desglose.</span>}
+              imgVal={funnelDispImg} refImg={refFunnelDispImg} setterImg={setFunnelDispImg}
+            />
+            <CsvTable parsed={funnelDispCsv}/>
+            <InsightBlock k='funnelDisp'/>
           </Card>
+
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(2)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
+              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
               <Btn onClick={()=>setSub(4)}>Siguiente →</Btn>
             </div>
           </div>
@@ -977,27 +1228,28 @@ function CreateProject({onSave, onCancel, initial}){
           ))}
 
           <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'4px'}}>Datos de BBDD / CRM <Tag color='amber'>Opcional</Tag></p>
-            <p style={{...T.body,marginBottom:'10px'}}>Sube un CSV exportado de tu CRM con datos agregados y anonimizados. No necesitamos emails ni nombres — solo patrones de comportamiento.</p>
+            <CardHeader title='Datos de BBDD / CRM' k='crm' tag={<Tag color='amber'>Opcional</Tag>}/>
+            <p style={{...T.body,marginBottom:'10px'}}>Sube un CSV exportado de tu CRM con datos agregados y anonimizados. No necesitamos emails ni nombres — solo patrones de comportamiento. Período recomendado: últimos 12 meses (la recurrencia y el LTV necesitan ventana larga).</p>
             <div style={{background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'8px',padding:'9px 12px',marginBottom:'12px',fontSize:'11px',color:C.green}}>
               🔒 Solo datos agregados — sin emails, sin nombres, sin datos personales. Compatible con GDPR.
             </div>
             <div onClick={()=>refCrm.current.click()}
               style={{border:`1.5px dashed ${crmCsv?C.green:C.border}`,borderRadius:'10px',padding:'16px',textAlign:'center',cursor:'pointer',background:crmCsv?C.greenDim:'#070713'}}>
-              <input ref={refCrm} type='file' accept='.csv,.xlsx,.xls,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setCrmCsv)}/>
+              <input ref={refCrm} type='file' accept='.csv,.xlsx,.xls,.txt' style={{display:'none'}} onChange={e=>handleFile(e.target.files[0],setCrmCsv,'crm')}/>
               <div style={{fontSize:'20px',marginBottom:'5px'}}>📁</div>
               {crmCsv?<p style={{fontSize:'13px',fontWeight:600,color:C.green}}>{crmCsv.fileName} · {crmCsv.rows?.length||0} filas</p>
                 :<p style={{fontSize:'13px',color:C.txtDim}}>Arrastra CSV/Excel o haz clic para subir</p>}
               <p style={{...T.small,marginTop:'4px'}}>Columnas recomendadas: segmento, ticket_medio, frecuencia_compra, ltv, canal_origen, fecha_ultima_compra</p>
             </div>
             {crmCsv&&<div style={{...T.small,background:'#0A1A14',border:`1px solid rgba(0,212,170,0.15)`,borderRadius:'6px',padding:'7px 10px',marginTop:'6px'}}>✓ Columnas detectadas: {crmCsv.headers?.join(', ')}</div>}
+            <InsightBlock k='crm'/>
           </Card>
 
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(3)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave}>Guardar cambios</Btn>}
-              <Btn variant='green' onClick={handleSave}>{isEdit?'Guardar cambios':'Crear proyecto'} ({score()}% precisión)</Btn>
+              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
+              <Btn variant='green' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':(isEdit?'Guardar cambios':'Crear proyecto')+' ('+score()+'% precisión)'}</Btn>
             </div>
           </div>
         </div>
@@ -2359,8 +2611,19 @@ function ApiScreen({onReady}){
 function App(){
   const [apiKey,setApiKey]=useState('');
   const [nav,setNav]=useState('projects');
-  const [projects,setProjects]=useState([PILOT_PROJECT]);
+  const [projects,setProjects]=useState(()=>{
+    try{
+      const saved=localStorage.getItem('synthab_projects');
+      if(saved) return JSON.parse(saved);
+    }catch(e){ console.error('No se pudo leer localStorage:',e); }
+    return [PILOT_PROJECT];
+  });
   const [view,setView]=useState({screen:'list'});
+
+  useEffect(()=>{
+    try{ localStorage.setItem('synthab_projects', JSON.stringify(projects)); }
+    catch(e){ console.error('No se pudo guardar en localStorage (¿cuota superada?):',e); }
+  },[projects]);
 
   if(!apiKey) return(
     <div style={{background:C.bg,minHeight:'100vh'}}>
@@ -2389,8 +2652,8 @@ function App(){
           <>
             {view.screen==='list'&&<ProjectsList projects={projects} onSelect={p=>setView({screen:'detail',project:p})} onCreate={()=>setView({screen:'create'})}/>}
             {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView({screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
-            {view.screen==='create'&&<CreateProject onSave={addProject} onCancel={()=>setView({screen:'list'})}/>}
-            {view.screen==='edit'&&currentProject&&<CreateProject initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));setView({screen:'detail',project:p});}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
+            {view.screen==='create'&&<CreateProject apiKey={apiKey} onSave={addProject} onCancel={()=>setView({screen:'list'})}/>}
+            {view.screen==='edit'&&currentProject&&<CreateProject apiKey={apiKey} initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));setView({screen:'detail',project:p});}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='newtest'&&currentProject&&<CreateTest project={currentProject} apiKey={apiKey} onSave={t=>addTest(currentProject.id,t)} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='report'&&currentProject&&<ReportView project={currentProject} test={view.test} results={view.test?.results} onBack={()=>setView({screen:'detail',project:currentProject})}/>}
           </>
