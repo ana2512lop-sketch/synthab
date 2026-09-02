@@ -769,8 +769,8 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
   const refCrm=useRef();
 
   function score(){
-    let s=30;
-    if(cvr&&sesiones&&ticket) s+=10;
+    let s=0;
+    if(cvr&&sesiones&&ticket) s+=40;
     if(rebote) s+=5;
     if(exp1) s+=20;
     if(exp2) s+=10;
@@ -2409,7 +2409,7 @@ Devuelve SOLO JSON:
                 <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
                   <Tag color='green'>{profiles.arquetipos.length} arquetipos</Tag>
                   <Tag color='blue'>{profiles.total.toLocaleString()} sesiones</Tag>
-                  <Tag color='amber'>{project.quality||72}% precisión</Tag>
+                  <Tag color='amber'>{project.quality??0}% precisión</Tag>
                 </div>
                 <p style={{...T.small}}>Haz clic en un perfil para ver la ficha completa</p>
               </div>
