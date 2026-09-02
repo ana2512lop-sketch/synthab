@@ -336,10 +336,20 @@ function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,o
     if(!apiKey) return;
     setGenArch(true);setErrArch('');
     try{
+      // Mandamos el CSV completo a la IA (no solo una muestra), para que los arquetipos reflejen
+      // todo el período subido. Límite de seguridad muy alto solo para evitar romper la llamada
+      // a la API con archivos desproporcionados — no debería activarse con datos reales.
+      const FILAS_MAX_IA=5000;
+      const fmt=d=>{
+        const total=d.rows.length;
+        const filas=total>FILAS_MAX_IA?d.rows.slice(0,FILAS_MAX_IA):d.rows;
+        const nota=total>FILAS_MAX_IA?` (mostrando ${FILAS_MAX_IA} de ${total} filas — archivo muy grande)`:'';
+        return `columnas: ${d.headers.join(', ')}. Filas${nota}: ${JSON.stringify(filas)}`;
+      };
       const ctx=[
-        project.exp1Data?`Exp1 (quién es el usuario) — columnas: ${project.exp1Data.headers.join(', ')}. Filas: ${JSON.stringify(project.exp1Data.rows.slice(0,25))}`:null,
-        project.exp2Data?`Exp2 (cómo llega) — columnas: ${project.exp2Data.headers.join(', ')}. Filas: ${JSON.stringify(project.exp2Data.rows.slice(0,25))}`:null,
-        project.exp3Data?`Exp3 (cómo navega) — columnas: ${project.exp3Data.headers.join(', ')}. Filas: ${JSON.stringify(project.exp3Data.rows.slice(0,25))}`:null,
+        project.exp1Data?`Exp1 (quién es el usuario) — ${fmt(project.exp1Data)}`:null,
+        project.exp2Data?`Exp2 (cómo llega) — ${fmt(project.exp2Data)}`:null,
+        project.exp3Data?`Exp3 (cómo navega) — ${fmt(project.exp3Data)}`:null,
       ].filter(Boolean).join('\n\n');
       const listaNombres=ARQUETIPOS_BASE.map(a=>a.n).join(', ');
       const prompt=`Eres un analista CRO. Este es un ecommerce de sector "${project.sector}". Datos disponibles:\n\n${ctx||'(sin CSV de comportamiento subido — estima con criterio general del sector)'}\n\nClasifica la población de usuarios en estos 10 arquetipos fijos: ${listaNombres}. Para cada uno, estima el % de población (deben sumar 100 entre los 10) y escribe: descripción (1 frase), señales que lo identifican (1 frase, concreta si hay datos), qué necesita (1 frase), qué se recomienda (1 frase accionable). Responde SOLO con un array JSON de 10 objetos con claves: nombre, poblacion (número), descripcion, senales, necesita, recomendacion.`;
@@ -659,45 +669,98 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
   const refKpisImg=useRef();
 
   // Los KPIs se leen SIEMPRE del CSV subido — nada de valores manuales que puedan quedar desfasados.
+  // IMPORTANTE: se agrega TODO el CSV (no solo la primera fila), para que el análisis
+  // refleje el período completo y no un único día suelto.
   // Si se quita el CSV, se limpian también los valores derivados (ver setKpisCsvClean más abajo).
   useEffect(()=>{
     if(!kpisCsv||!kpisCsv.rows||!kpisCsv.rows.length) return;
     const headers=kpisCsv.headers;
     const rows=kpisCsv.rows;
     const findCol=(...keys)=>headers.find(h=>keys.some(k=>h.toLowerCase().includes(k)));
-    const row=rows[0];
-    const val=(...keys)=>{ const h=findCol(...keys); return h?row[h]:null; };
-    const ok=v=>v!==null&&v!==undefined&&v!=='';
-    const nSes=val('sesion','session'); setSesiones(ok(nSes)?nSes:'');
-    const nTrans=val('transacc','transaction'); setTransacciones(ok(nTrans)?nTrans:'');
-    const nIng=val('ingreso','revenue'); setIngresos(ok(nIng)?nIng:'');
-    const nCvr=val('conversión','conversion','cvr'); setCvr(ok(nCvr)?nCvr:'');
-    const nReb=val('rebote','bounce'); setRebote(ok(nReb)?nReb:'');
-    const nTic=val('ticket','aov','valor medio','ingresos por transacc'); setTicket(ok(nTic)?nTic:'');
 
-    // Desglose por dispositivo: solo si el CSV trae varias filas con dimensión de dispositivo
-    const devCol=findCol('dispositivo','device');
-    if(devCol&&rows.length>1){
-      const sesCol=findCol('sesion','session');
-      const tot={desktop:0,mobile:0,tablet:0};
-      let sum=0;
-      rows.forEach(r=>{
-        const n=parseFloat((r[sesCol]||'0').toString().replace(/\./g,'').replace(',','.'))||0;
-        sum+=n;
-        const dv=(r[devCol]||'').toLowerCase();
-        if(dv.includes('mobile')||dv.includes('móvil')) tot.mobile+=n;
-        else if(dv.includes('desktop')||dv.includes('escritorio')) tot.desktop+=n;
-        else if(dv.includes('tablet')) tot.tablet+=n;
-      });
-      if(sum>0){
-        setDesktop(Math.round(tot.desktop/sum*100));
-        setMobile(Math.round(tot.mobile/sum*100));
-        setTablet(Math.round(tot.tablet/sum*100));
+    // Parser robusto: soporta tanto formato US (1234.56) como EU (1.234,56) sin romper el número.
+    const parseNum=(v)=>{
+      if(v===null||v===undefined) return NaN;
+      let s=v.toString().trim().replace(/[€%\s]/g,'');
+      if(s==='') return NaN;
+      const hasComma=s.includes(','), hasDot=s.includes('.');
+      if(hasComma&&hasDot){
+        if(s.lastIndexOf(',')>s.lastIndexOf('.')) s=s.replace(/\./g,'').replace(',','.');
+        else s=s.replace(/,/g,'');
+      }else if(hasComma){
+        const dec=s.split(',').pop();
+        s=dec.length<=2?s.replace(',','.'):s.replace(/,/g,'');
       }
+      return parseFloat(s);
+    };
+
+    const sesCol=findCol('sesion','session');
+    const transCol=findCol('transacc','transaction');
+    const ingCol=findCol('ingreso','revenue');
+    const cvrCol=findCol('conversión','conversion','cvr');
+    const rebCol=findCol('rebote','bounce');
+    const ticCol=findCol('ticket','aov','valor medio','ingresos por transacc');
+    const devCol=findCol('dispositivo','device');
+    const dateCol=findCol('fecha','date','día');
+
+    let totSes=0,totTrans=0,totIng=0,hasSes=false,hasTrans=false,hasIng=false;
+    let sumRebPond=0,sumCvrPond=0,cvrPondWeight=0,hasCvrCol=false;
+    let sumTicPond=0,ticPondWeight=0,hasTicCol=false;
+    const devTot={desktop:0,mobile:0,tablet:0};
+    let devSum=0;
+
+    rows.forEach(r=>{
+      const nSes=sesCol?parseNum(r[sesCol]):NaN;
+      const nTrans=transCol?parseNum(r[transCol]):NaN;
+      const nIng=ingCol?parseNum(r[ingCol]):NaN;
+      if(!isNaN(nSes)){ totSes+=nSes; hasSes=true; }
+      if(!isNaN(nTrans)){ totTrans+=nTrans; hasTrans=true; }
+      if(!isNaN(nIng)){ totIng+=nIng; hasIng=true; }
+
+      if(rebCol){
+        const nReb=parseNum(r[rebCol]);
+        if(!isNaN(nReb)&&!isNaN(nSes)) sumRebPond+=nReb*nSes;
+      }
+      if(cvrCol){
+        const nCvr=parseNum(r[cvrCol]);
+        if(!isNaN(nCvr)&&!isNaN(nSes)){ sumCvrPond+=nCvr*nSes; cvrPondWeight+=nSes; hasCvrCol=true; }
+      }
+      if(ticCol){
+        const nTic=parseNum(r[ticCol]);
+        if(!isNaN(nTic)&&!isNaN(nTrans)){ sumTicPond+=nTic*nTrans; ticPondWeight+=nTrans; hasTicCol=true; }
+      }
+      if(devCol&&!isNaN(nSes)){
+        devSum+=nSes;
+        const dv=(r[devCol]||'').toLowerCase();
+        if(dv.includes('mobile')||dv.includes('móvil')) devTot.mobile+=nSes;
+        else if(dv.includes('desktop')||dv.includes('escritorio')) devTot.desktop+=nSes;
+        else if(dv.includes('tablet')) devTot.tablet+=nSes;
+      }
+    });
+
+    setSesiones(hasSes?Math.round(totSes):'');
+    setTransacciones(hasTrans?Math.round(totTrans):'');
+    setIngresos(hasIng?totIng.toFixed(2):'');
+
+    // CVR: si hay columna propia, media ponderada por sesiones; si no, se deriva de transacciones/sesiones (más fiable que promediar filas sin ponderar).
+    if(hasCvrCol&&cvrPondWeight>0) setCvr((sumCvrPond/cvrPondWeight).toFixed(2));
+    else if(hasSes&&hasTrans&&totSes>0) setCvr((totTrans/totSes*100).toFixed(2));
+    else setCvr('');
+
+    // Rebote: media ponderada por sesiones (evita que un día de poco tráfico distorsione la media).
+    setRebote(hasSes&&totSes>0&&rebCol?(sumRebPond/totSes).toFixed(2):'');
+
+    // Ticket medio: si hay columna propia, ponderado por transacciones; si no, se deriva de ingresos/transacciones.
+    if(hasTicCol&&ticPondWeight>0) setTicket((sumTicPond/ticPondWeight).toFixed(2));
+    else if(hasIng&&hasTrans&&totTrans>0) setTicket((totIng/totTrans).toFixed(2));
+    else setTicket('');
+
+    if(devCol&&devSum>0){
+      setDesktop(Math.round(devTot.desktop/devSum*100));
+      setMobile(Math.round(devTot.mobile/devSum*100));
+      setTablet(Math.round(devTot.tablet/devSum*100));
     }
 
-    // Período: detecta columna de fecha y usa el rango real de los datos subidos
-    const dateCol=findCol('fecha','date','día');
     if(dateCol){
       const vals=rows.map(r=>r[dateCol]).filter(Boolean).sort();
       if(vals.length) setPeriodo(`${vals[0]} → ${vals[vals.length-1]}`);
@@ -936,18 +999,27 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
 
   // Genera "Comportamiento detectado" + "Oportunidad" para cada bloque que tenga datos.
   // Se ejecuta una sola vez al guardar (no por cada subida) para minimizar llamadas a la API.
+  // Mandamos el CSV completo a la IA (no una muestra), con un límite de seguridad muy alto
+  // solo para evitar romper la llamada con archivos desproporcionados.
+  function fmtCsvBlock(d){
+    const FILAS_MAX_IA=5000;
+    const total=(d.rows||[]).length;
+    const filas=total>FILAS_MAX_IA?d.rows.slice(0,FILAS_MAX_IA):d.rows;
+    const nota=total>FILAS_MAX_IA?` (mostrando ${FILAS_MAX_IA} de ${total} filas — archivo muy grande)`:'';
+    return `Columnas: ${(d.headers||[]).join(', ')}. Filas${nota}: ${JSON.stringify(filas)}`;
+  }
   async function generarInsights(){
     const bloques={
       kpis: (cvr&&sesiones)||kpisCsv? `CVR ${cvr}%, sesiones ${sesiones}, rebote ${rebote}%, ticket ${ticket}, dispositivos desktop ${desktop}% / mobile ${mobile}% / tablet ${tablet}%.${kpisCsv?` CSV original — columnas: ${kpisCsv.headers.join(', ')}.`:''}`:null,
-      exp1: exp1? `Columnas: ${(exp1.headers||[]).join(', ')}. Filas de ejemplo: ${JSON.stringify((exp1.rows||[]).slice(0,15))}`:null,
-      exp2: exp2? `Columnas: ${(exp2.headers||[]).join(', ')}. Filas de ejemplo: ${JSON.stringify((exp2.rows||[]).slice(0,15))}`:null,
-      exp3: exp3? `Columnas: ${(exp3.headers||[]).join(', ')}. Filas de ejemplo: ${JSON.stringify((exp3.rows||[]).slice(0,15))}`:null,
-      busqueda: busquedaCsv? `Columnas: ${(busquedaCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((busquedaCsv.rows||[]).slice(0,15))}`:null,
-      voz: vozCsv? `Columnas: ${(vozCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((vozCsv.rows||[]).slice(0,15))}`:null,
+      exp1: exp1? fmtCsvBlock(exp1):null,
+      exp2: exp2? fmtCsvBlock(exp2):null,
+      exp3: exp3? fmtCsvBlock(exp3):null,
+      busqueda: busquedaCsv? fmtCsvBlock(busquedaCsv):null,
+      voz: vozCsv? fmtCsvBlock(vozCsv):null,
       funnelQual: Object.keys(funnelQualImgs).length||Object.keys(checkoutStepImgs).length? `Capturas subidas para: ${Object.keys(funnelQualImgs).join(', ')}${checkoutSteps.length?', Checkout ('+checkoutSteps.map(s=>s.nombre).join(', ')+')':''}.`:null,
-      funnelVol: funnelVolCsv? `Columnas: ${(funnelVolCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((funnelVolCsv.rows||[]).slice(0,20))}`:null,
-      funnelDisp: funnelDispCsv? `Columnas: ${(funnelDispCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((funnelDispCsv.rows||[]).slice(0,20))}`:null,
-      crm: crmCsv? `Columnas: ${(crmCsv.headers||[]).join(', ')}. Filas: ${JSON.stringify((crmCsv.rows||[]).slice(0,20))}`:null,
+      funnelVol: funnelVolCsv? fmtCsvBlock(funnelVolCsv):null,
+      funnelDisp: funnelDispCsv? fmtCsvBlock(funnelDispCsv):null,
+      crm: crmCsv? fmtCsvBlock(crmCsv):null,
     };
     const activos=Object.entries(bloques).filter(([,v])=>v);
     if(!apiKey||activos.length===0) return;
