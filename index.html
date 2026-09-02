@@ -590,7 +590,7 @@ const CANAL_CONTEXTO={
   'QR / Offline': 'Viene del mundo físico: cartel, folleto, tienda, evento. Nivel consciencia 2-4 según contexto. Motivación concreta relacionada con el punto de contacto físico. Puede ser primera visita digital a la marca.',
 };
 
-function CreateProject({onSave, onCancel, initial, apiKey}){
+function CreateProject({onSave, onSaveDraft, onCancel, initial, apiKey}){
   const STEPS=[
     {num:'01',label:'KPIs'},
     {num:'02',label:'Comportamiento'},
@@ -1036,10 +1036,9 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
     }
   }
 
-  async function handleSave(){
-    await generarInsights();
-    onSave({
-      id:initial?.id||('p'+Date.now()),
+  function buildPayload(){
+    return {
+      id:projectId,
       name,domain,sector,periodo,
       createdAt:initial?.createdAt||new Date().toISOString().slice(0,10),
       quality:score(),
@@ -1064,7 +1063,20 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
       funnelDispImg,
       timestamps,insights,
       tests:initial?.tests||[]
-    });
+    };
+  }
+  // Guardado intermedio: disponible en cualquier paso, no navega a otra pantalla.
+  // Permite guardar según se van subiendo cosas, sin tener que terminar los 5 pasos.
+  async function handleSaveDraft(){
+    await generarInsights();
+    (onSaveDraft||onSave)(buildPayload());
+    setSavedToast(true);
+    setTimeout(()=>setSavedToast(false),3000);
+  }
+  // Guardado final: el botón principal del último paso. En modo creación, navega al detalle del proyecto.
+  async function handleSave(){
+    await generarInsights();
+    onSave(buildPayload());
     setSavedToast(true);
     setTimeout(()=>setSavedToast(false),3000);
   }
@@ -1087,6 +1099,9 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
   }
 
   const isEdit = !!initial;
+  // Id estable durante toda la sesión de creación/edición — así los guardados intermedios
+  // (borrador) y el guardado final actualizan el MISMO proyecto en vez de crear duplicados.
+  const [projectId]=useState(()=>initial?.id||('p'+Date.now()));
 
   return(
     <div className='fade' style={{padding:'28px 32px',maxWidth:'680px'}}>
@@ -1102,7 +1117,7 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
       </div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'16px'}}>
         <div>
-          <h1 style={{...T.h1,marginBottom:'4px'}}>{isEdit?`Editar — ${initial.name}`:'Crear proyecto'}</h1>
+          <h1 style={{...T.h1,marginBottom:'4px'}}>{isEdit?`Editar — ${initial.name}`:(name?`Crear proyecto — ${name}`:'Crear proyecto')}</h1>
           <p style={T.body}>Base de datos del cliente. Cuanto más completa, más precisos los perfiles sintéticos.</p>
         </div>
       </div>
@@ -1164,7 +1179,7 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={savingAI}>{savingAI?'Guardando...':'💾 Guardar borrador'}</Btn>
               <Btn disabled={!name||!domain||!cvr||!sesiones||!ticket} onClick={()=>setSub(1)}>Siguiente →</Btn>
             </div>
           </div>
@@ -1207,7 +1222,7 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(0)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={savingAI}>{savingAI?'Guardando...':'💾 Guardar borrador'}</Btn>
               <Btn disabled={!exp1} onClick={()=>setSub(2)}>Siguiente →</Btn>
             </div>
           </div>
@@ -1315,7 +1330,7 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(1)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={savingAI}>{savingAI?'Guardando...':'💾 Guardar borrador'}</Btn>
               <Btn onClick={()=>setSub(3)}>Siguiente →</Btn>
             </div>
           </div>
@@ -1352,7 +1367,7 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(2)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={savingAI}>{savingAI?'Guardando...':'💾 Guardar borrador'}</Btn>
               <Btn onClick={()=>setSub(4)}>Siguiente →</Btn>
             </div>
           </div>
@@ -1438,7 +1453,7 @@ function CreateProject({onSave, onCancel, initial, apiKey}){
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setSub(3)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              {isEdit&&<Btn variant='ghost' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':'Guardar cambios'}</Btn>}
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={savingAI}>{savingAI?'Guardando...':'💾 Guardar borrador'}</Btn>
               <Btn variant='green' onClick={handleSave} disabled={savingAI}>{savingAI?'Analizando datos...':(isEdit?'Guardar cambios':'Crear proyecto')+' ('+score()+'% precisión)'}</Btn>
             </div>
           </div>
@@ -2891,7 +2906,14 @@ function App(){
     </div>
   );
 
-  function addProject(p){setProjects(prev=>[...prev,p]);setView({screen:'detail',project:p});}
+  // Upsert: si el proyecto ya existe (por ejemplo, se guardó como borrador antes), lo actualiza
+  // en vez de duplicarlo. addProject navega al detalle (guardado final); saveDraft no navega
+  // (guardado intermedio mientras se sigue rellenando el formulario).
+  function upsertProjects(prev,p){
+    return prev.some(pr=>pr.id===p.id) ? prev.map(pr=>pr.id===p.id?p:pr) : [...prev,p];
+  }
+  function addProject(p){setProjects(prev=>upsertProjects(prev,p));setView({screen:'detail',project:p});}
+  function saveDraft(p){setProjects(prev=>upsertProjects(prev,p));}
   function addTest(projectId,t){
     setProjects(prev=>prev.map(p=>p.id===projectId?{...p,tests:[...p.tests,t]}:p));
     const updatedProject=projects.find(p=>p.id===projectId);
@@ -2908,8 +2930,8 @@ function App(){
           <>
             {view.screen==='list'&&<ProjectsList projects={projects} onSelect={p=>setView({screen:'detail',project:p})} onCreate={()=>setView({screen:'create'})}/>}
             {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} apiKey={apiKey} onUpdateProject={p=>setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr))} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView({screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
-            {view.screen==='create'&&<CreateProject apiKey={apiKey} onSave={addProject} onCancel={()=>setView({screen:'list'})}/>}
-            {view.screen==='edit'&&currentProject&&<CreateProject apiKey={apiKey} initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
+            {view.screen==='create'&&<CreateProject apiKey={apiKey} onSave={addProject} onSaveDraft={saveDraft} onCancel={()=>setView({screen:'list'})}/>}
+            {view.screen==='edit'&&currentProject&&<CreateProject apiKey={apiKey} initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));}} onSaveDraft={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='newtest'&&currentProject&&<CreateTest project={currentProject} apiKey={apiKey} onSave={t=>addTest(currentProject.id,t)} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='report'&&currentProject&&<ReportView project={currentProject} test={view.test} results={view.test?.results} onBack={()=>setView({screen:'detail',project:currentProject})}/>}
           </>
