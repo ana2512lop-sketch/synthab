@@ -1944,6 +1944,7 @@ function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
   const [abandono,setAbandono]=useState('');
   const [pageImgs,setPageImgs]=useState(d?.pageImgs||{heatmapClics:null,heatmapScroll:null});
   const [csvRutas,setCsvRutas]=useState(d?.csvRutas||null);
+  const [contexto,setContexto]=useState(d?.contexto||'');
   const refCsvRutas=useRef();
   const refHeatClics=useRef();
   const refHeatScroll=useRef();
@@ -2077,6 +2078,7 @@ CVR base: ${project.kpis.cvr}%, Mobile: ${project.kpis.mobile}%, Tipo compra: ${
 
 CONTEXTO: Sector ${project.sector}, Ticket ${project.kpis.ticket}€, URL: ${url} (${pagina})
 ${sesionesTotales?`Sesiones/mes: ${sesionesTotales}`:''}${pctEntrada?` · Entrada: ${pctEntrada}%`:''}${tasaSalida?` · Salida: ${tasaSalida}%`:''}${posicionFunnel?` · Funnel: ${posicionFunnel}`:''}
+${contexto?`\nCONTEXTO Y ESTRATEGIA DEL TEST (aportado por el usuario): ${contexto}`:''}
 
 SEGMENTO DEL TEST:
 - Dispositivo: ${segDispositivo==='todos'?'Todos':segDispositivo+' ÚNICAMENTE'}
@@ -2252,7 +2254,7 @@ Devuelve SOLO JSON:
       createdAt:(initial&&initial.createdAt)||new Date().toISOString().slice(0,10),
       results:null,
       draft:{
-        tsub,url,pagina,csvRutas,pageImgs,
+        tsub,url,pagina,contexto,csvRutas,pageImgs,
         segDispositivo,segTipo,segCanal,nProfiles,profiles,
         hip,varA,varB,imgAName,imgBName,figmaUrlA,figmaUrl,
         metricaP,metricasS,split
@@ -2289,6 +2291,23 @@ Devuelve SOLO JSON:
             <p style={{...T.h3,marginBottom:'14px'}}>URL de la página a testar</p>
             <Input label='URL completa' value={url} onChange={setUrl} placeholder='https://tienda.com/producto/zapatillas' required hint='La IA usará esta URL para contextualizar el comportamiento de cada agente en esta página concreta.'/>
             <Select label='Tipo de página' value={pagina} onChange={setPagina} options={paginas}/>
+          </Card>
+
+          {/* Contexto libre — qué quieres probar y por qué, antes de meterte en datos */}
+          <Card style={{marginBottom:'12px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
+              <p style={T.h3}>Contexto y estrategia del test</p>
+              <Tag color='amber'>Opcional</Tag>
+            </div>
+            <p style={{...T.body,marginBottom:'10px'}}>
+              Apunta aquí qué quieres probar, tu hipótesis, o cualquier cosa de contexto que la IA deba tener en cuenta. No hace falta que esté definido del todo — puedes afinarlo luego en el paso "Test".
+            </p>
+            <textarea
+              value={contexto}
+              onChange={e=>setContexto(e.target.value)}
+              placeholder='Ej: Creemos que el checkout tiene demasiados pasos y eso genera abandono en mobile. Queremos probar un checkout de un solo paso frente al actual...'
+              style={{width:'100%',minHeight:'70px',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',resize:'vertical',fontFamily:'inherit'}}
+            />
           </Card>
 
           {/* CSV sesiones de la URL — protagonista, dato clave del test */}
@@ -2580,7 +2599,7 @@ Devuelve SOLO JSON:
               <Btn variant='ghost' onClick={()=>{setProfiles(null);generarPerfiles();}}>
                 {profiles?'Regenerar':'Generar perfiles'}
               </Btn>
-              <Btn disabled={!profiles} onClick={()=>setTsub(3)}>Continuar →</Btn>
+              <Btn disabled={!profiles} onClick={()=>{if(!hip&&contexto)setHip(contexto);setTsub(3);}}>Continuar →</Btn>
             </div>
           </div>
         </div>
