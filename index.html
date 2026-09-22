@@ -92,6 +92,32 @@ const Tag=({children,color='default'})=>{
   return <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'20px',background:m.bg,color:m.col}}>{children}</span>;
 };
 
+// Nombre editable in situ — clic en el lápiz para renombrar sin entrar al flujo completo de edición
+function EditableName({name,onChange}){
+  const [editing,setEditing]=useState(false);
+  const [val,setVal]=useState(name);
+  function commit(){
+    const v=val.trim();
+    if(v&&v!==name) onChange(v);
+    setEditing(false);
+  }
+  if(editing) return(
+    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+      <input autoFocus value={val} onChange={e=>setVal(e.target.value)}
+        onKeyDown={e=>{if(e.key==='Enter') commit(); if(e.key==='Escape'){setVal(name);setEditing(false);}}}
+        style={{...T.h1,background:'#070713',border:`1px solid ${C.accent}`,borderRadius:'6px',padding:'2px 8px',outline:'none',width:'320px',maxWidth:'100%'}}/>
+      <button onClick={commit} style={{background:'none',border:'none',cursor:'pointer',color:C.green,fontSize:'16px'}}>✓</button>
+      <button onClick={()=>{setVal(name);setEditing(false);}} style={{background:'none',border:'none',cursor:'pointer',color:C.txtDim,fontSize:'14px'}}>✕</button>
+    </div>
+  );
+  return(
+    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+      <h1 style={T.h1}>{name}</h1>
+      <button onClick={()=>{setVal(name);setEditing(true);}} title='Renombrar' style={{background:'none',border:'none',cursor:'pointer',color:C.txtDim,fontSize:'13px',padding:'2px'}}>✎</button>
+    </div>
+  );
+}
+
 function Tooltip({text}){
   const [show,setShow]=useState(false);
   return(
@@ -219,10 +245,55 @@ function parseCSV(text){
   const clean=text.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
   const lines=clean.split('\n').filter(l=>l.trim());
   if(lines.length<2) return null;
-  const sep=lines[0].includes(';')?';':',';
+  const sep=lines[0].includes('\t')?'\t':lines[0].includes(';')?';':',';
   const headers=lines[0].split(sep).map(h=>h.trim().replace(/"/g,''));
   const rows=lines.slice(1).map(line=>{const vals=line.split(sep).map(v=>v.trim().replace(/"/g,''));const obj={};headers.forEach((h,i)=>{obj[h]=vals[i]||'';});return obj;});
   return{headers,rows,raw:clean};
+}
+// Convierte '1.240', '0,44%', '44,1' etc en número, sea cual sea el formato regional con el que GA4 lo haya exportado
+function toNum(v){
+  if(v===null||v===undefined) return NaN;
+  let s=String(v).trim().replace(/[€$%\s]/g,'');
+  if(!s) return NaN;
+  if(s.includes(',')&&s.includes('.')){
+    s = s.lastIndexOf(',')>s.lastIndexOf('.') ? s.replace(/\./g,'').replace(',','.') : s.replace(/,/g,'');
+  } else if(s.includes(',')){
+    s = s.replace(',','.');
+  }
+  return parseFloat(s);
+}
+// Calcula un resumen de KPIs (CVR, sesiones, rebote, desglose por dispositivo) a partir del CSV subido,
+// para confirmar visualmente que se ha leído bien antes de generar perfiles
+function csvSummary(csv){
+  if(!csv||!csv.rows||!csv.rows.length) return null;
+  const h=csv.headers;
+  const find=re=>h.find(x=>re.test(x));
+  const hDisp=find(/dispositivo|device/i);
+  const hSes=find(/sesion/i);
+  const hCvr=find(/^cvr$|conversi/i);
+  const hRebote=find(/rebote/i);
+  const hFecha=find(/fecha|date/i);
+  let totalSes=0,cvrPeso=0,rebotePeso=0,cvrFilas=0,reboteFilas=0;
+  const porDispositivo={};
+  let fechaMin=null,fechaMax=null;
+  csv.rows.forEach(r=>{
+    const ses=toNum(r[hSes])||0;
+    totalSes+=ses;
+    if(hCvr){const c=toNum(r[hCvr]);if(!isNaN(c)){cvrPeso+=c*ses;cvrFilas+=ses;}}
+    if(hRebote){const rb=toNum(r[hRebote]);if(!isNaN(rb)){rebotePeso+=rb*ses;reboteFilas+=ses;}}
+    if(hDisp){
+      const d=(r[hDisp]||'otros').toLowerCase();
+      porDispositivo[d]=(porDispositivo[d]||0)+ses;
+    }
+    if(hFecha&&r[hFecha]){
+      if(fechaMin===null||r[hFecha]<fechaMin) fechaMin=r[hFecha];
+      if(fechaMax===null||r[hFecha]>fechaMax) fechaMax=r[hFecha];
+    }
+  });
+  const cvrMedio = cvrFilas? cvrPeso/cvrFilas : null;
+  const reboteMedio = reboteFilas? rebotePeso/reboteFilas : null;
+  const sospechoso = totalSes<=0 || (cvrMedio!==null && (cvrMedio>100||cvrMedio<0));
+  return {totalSesiones:totalSes,segmentos:csv.rows.length,cvrMedio,reboteMedio,porDispositivo,fechaMin,fechaMax,sospechoso};
 }
 
 // ── NAV ───────────────────────────────────────────────────────────────────
@@ -378,7 +449,7 @@ function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,o
         <span style={{fontSize:'13px',color:C.txt}}>{project.name}</span>
       </div>
       <div style={{marginBottom:'20px'}}>
-        <h1 style={T.h1}>{project.name}</h1>
+        <EditableName name={project.name} onChange={n=>onUpdateProject({...project,name:n})}/>
         <p style={{...T.mono,marginTop:'3px'}}>{project.domain}</p>
       </div>
 
@@ -1846,8 +1917,9 @@ function TutorialGa4(){
           <div style={{display:'flex',gap:'10px'}}>
             <div style={{width:'22px',height:'22px',borderRadius:'50%',background:C.accent,color:'#fff',fontSize:'11px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:'1px'}}>4</div>
             <div style={{flex:1,background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
-              <p style={{color:C.txt,fontWeight:600,marginBottom:'3px'}}>Exportar</p>
-              <p>Arriba a la derecha → <strong style={{color:C.txt}}>icono descarga → Descargar CSV</strong></p>
+              <p style={{color:C.txt,fontWeight:600,marginBottom:'3px'}}>Pasa los datos aquí (recomendado)</p>
+              <p>Selecciona toda la tabla (clic en la esquina superior izquierda o Ctrl+A dentro de ella), <strong style={{color:C.txt}}>copia (Ctrl+C)</strong> y pégala en el recuadro de abajo. Así no se rompen los decimales.</p>
+              <p style={{marginTop:'6px',color:C.txtDim}}>¿Prefieres archivo? Icono descarga → <strong style={{color:C.txt}}>Hojas de cálculo de Google</strong> → Archivo → Descargar → CSV, y súbelo abajo.</p>
               <p style={{marginTop:'5px',color:C.amber}}>💡 Rango recomendado: <strong style={{color:C.txt}}>últimos 90 días</strong> para tener volumen suficiente por segmento.</p>
             </div>
           </div>
@@ -1858,45 +1930,48 @@ function TutorialGa4(){
   );
 }
 
-function CreateTest({project,apiKey,onSave,onCancel}){
+function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
   const TSTEPS=['URL y página','Segmentación','Perfiles','Test','QA','Lanzar'];
-  const [tsub,setTsub]=useState(0);
-  const [url,setUrl]=useState('');
-  const [pagina,setPagina]=useState('página de producto');
+  const testId=useRef(initial?.id||('t'+Date.now())).current;
+  const d=initial?.draft||null; // borrador guardado, si venimos de retomar un test a medias
+  const [tsub,setTsub]=useState(d?.tsub||0);
+  const [url,setUrl]=useState(d?.url||'');
+  const [pagina,setPagina]=useState(d?.pagina||'página de producto');
   const [sesionesTotales,setSesionesTotales]=useState('');
   const [pctEntrada,setPctEntrada]=useState('');
   const [tasaSalida,setTasaSalida]=useState('');
   const [posicionFunnel,setPosicionFunnel]=useState('');
   const [abandono,setAbandono]=useState('');
-  const [pageImgs,setPageImgs]=useState({heatmapClics:null,heatmapScroll:null});
-  const [csvRutas,setCsvRutas]=useState(null);
+  const [pageImgs,setPageImgs]=useState(d?.pageImgs||{heatmapClics:null,heatmapScroll:null});
+  const [csvRutas,setCsvRutas]=useState(d?.csvRutas||null);
   const refCsvRutas=useRef();
   const refHeatClics=useRef();
   const refHeatScroll=useRef();
   // Segmentación
-  const [segDispositivo,setSegDispositivo]=useState('todos');
-  const [segTipo,setSegTipo]=useState('todos');
-  const [segCanal,setSegCanal]=useState('todos');
-  const [profiles,setProfiles]=useState(null);
+  const [segDispositivo,setSegDispositivo]=useState(d?.segDispositivo||'todos');
+  const [segTipo,setSegTipo]=useState(d?.segTipo||'todos');
+  const [segCanal,setSegCanal]=useState(d?.segCanal||'todos');
+  const [profiles,setProfiles]=useState(d?.profiles||null);
   const [loadingP,setLoadingP]=useState(false);
   const [errP,setErrP]=useState('');
-  const [nProfiles,setNProfiles]=useState(10);
+  const [nProfiles,setNProfiles]=useState(d?.nProfiles||10);
   const [nSesiones,setNSesiones]=useState(1000);
   const [showManual,setShowManual]=useState(false);
-  const [hip,setHip]=useState('');
-  const [varA,setVarA]=useState('');
-  const [varB,setVarB]=useState('');
+  const [hip,setHip]=useState(d?.hip||'');
+  const [varA,setVarA]=useState(d?.varA||'');
+  const [varB,setVarB]=useState(d?.varB||'');
   const [imgB,setImgB]=useState(null);
-  const [imgAName,setImgAName]=useState('');
-  const [imgBName,setImgBName]=useState('');
-  const [figmaUrlA,setFigmaUrlA]=useState('');
-  const [figmaUrl,setFigmaUrl]=useState('');
+  const [imgAName,setImgAName]=useState(d?.imgAName||'');
+  const [imgBName,setImgBName]=useState(d?.imgBName||'');
+  const [figmaUrlA,setFigmaUrlA]=useState(d?.figmaUrlA||'');
+  const [figmaUrl,setFigmaUrl]=useState(d?.figmaUrl||'');
   const imgRef=useRef();
   const imgRefA=useRef();
 
+  const [metricaP,setMetricaP]=useState(d?.metricaP||'tasa de conversión');
   const [metricaPCustom,setMetricaPCustom]=useState('');
-  const [metricasS,setMetricasS]=useState([]);
-  const [split,setSplit]=useState(50);
+  const [metricasS,setMetricasS]=useState(d?.metricasS||[]);
+  const [split,setSplit]=useState(d?.split||50);
   const [results,setResults]=useState(null);
   const [loadingSim,setLoadingSim]=useState(false);
   const [errSim,setErrSim]=useState('');
@@ -1945,6 +2020,31 @@ function CreateTest({project,apiKey,onSave,onCancel}){
           ✓ Columnas: {parsed.headers.join(', ')}
         </div>}
       </div>
+    );
+  }
+
+  // Pegar tabla copiada directamente de GA4 — evita el problema de coma decimal vs separador CSV
+  function PasteCsvBox({parsed,setter}){
+    const [open,setOpen]=useState(false);
+    const [text,setText]=useState('');
+    function handlePaste(v){
+      setText(v);
+      const p=parseCSV(v);
+      if(p) setter({...p,fileName:'Pegado desde GA4'});
+    }
+    if(!open&&!parsed) return(
+      <button onClick={()=>setOpen(true)} style={{width:'100%',background:'none',border:`1px dashed ${C.border}`,borderRadius:'8px',padding:'8px',color:C.txtMid,fontSize:'12px',cursor:'pointer'}}>
+        📋 Pegar tabla copiada de GA4
+      </button>
+    );
+    if(!open) return null;
+    return(
+      <textarea
+        value={text}
+        onChange={e=>handlePaste(e.target.value)}
+        placeholder='Selecciona la tabla en GA4 (Ctrl+A dentro de la tabla), copia (Ctrl+C) y pega aquí (Ctrl+V)...'
+        style={{width:'100%',minHeight:'90px',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',color:C.txt,fontSize:'12px',fontFamily:'monospace',outline:'none',resize:'vertical'}}
+      />
     );
   }
 
@@ -2137,11 +2237,28 @@ Devuelve SOLO JSON:
 
   function handleSave(){
     const t={
-      id:'t'+Date.now(),name:hip.slice(0,40)||'Nuevo test',url,status:'completado',
+      id:testId,name:hip.slice(0,40)||'Nuevo test',url,status:'completado',
       ganador:results?.ganador,uplift:results?(results.uplift_cvr>0?'+':'')+Number(results.uplift_cvr).toFixed(1)+'%':null,
-      createdAt:new Date().toISOString().slice(0,10),results
+      createdAt:(initial&&initial.createdAt)||new Date().toISOString().slice(0,10),results
     };
     onSave(t);
+  }
+
+  // Guarda el progreso actual como borrador para poder retomarlo más tarde, sin perder lo ya rellenado
+  function handleSaveDraft(){
+    const t={
+      id:testId,name:(hip||url||'Nuevo test').slice(0,40),url,status:'borrador',
+      ganador:null,uplift:null,
+      createdAt:(initial&&initial.createdAt)||new Date().toISOString().slice(0,10),
+      results:null,
+      draft:{
+        tsub,url,pagina,csvRutas,pageImgs,
+        segDispositivo,segTipo,segCanal,nProfiles,profiles,
+        hip,varA,varB,imgAName,imgBName,figmaUrlA,figmaUrl,
+        metricaP,metricasS,split
+      }
+    };
+    (onSaveDraft||onSave)(t);
   }
 
   if(loadingP) return <Spinner text='Generando perfiles sintéticos...' sub={nProfiles>20?`Generando en lotes — ${nProfiles} perfiles en ${Math.ceil(nProfiles/20)} llamadas`:`Anclando al CVR real del proyecto (${project.kpis.cvr}%)`}/>;
@@ -2174,74 +2291,77 @@ Devuelve SOLO JSON:
             <Select label='Tipo de página' value={pagina} onChange={setPagina} options={paginas}/>
           </Card>
 
-          {/* KPIs de la página */}
-          <Card style={{marginBottom:'12px'}}>
+          {/* CSV sesiones de la URL — protagonista, dato clave del test */}
+          <Card style={{marginBottom:'12px',border:`1px solid ${C.accent}`}}>
             <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
-              <p style={T.h3}>KPIs de esta página</p>
-              <Tag color='amber'>Opcional — mejora perfiles</Tag>
+              <p style={T.h3}>Datos de comportamiento de esta página (GA4)</p>
+              <Tag color='purple'>Clave para los perfiles</Tag>
             </div>
-            <p style={{...T.body,marginBottom:'16px'}}>
-              Visión general de esta URL que complementa el CSV de sesiones. Datos que no vienen por segmento pero dan contexto a la IA sobre el peso e importancia de esta página.
+            <p style={{...T.body,marginBottom:'14px'}}>
+              El dato más importante del test — de aquí sale cómo se comportan tus usuarios reales en esta página. Cada fila se convierte en un arquetipo con comportamiento anclado a esa URL.
             </p>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
 
-              <KpiInput
-                label='Sesiones totales / mes'
-                value={sesionesTotales}
-                onChange={setSesionesTotales}
-                placeholder='Ej: 14.500'
-                tooltip='GA4 → Informes → Páginas y pantallas → busca tu URL → columna "Vistas" o "Sesiones". También en Explorar filtrando por esta URL.'
-              />
+            {/* Tutorial desplegable — colapsado por defecto, así no carga la pantalla de golpe */}
+            <TutorialGa4/>
 
-              <KpiInput
-                label='% tráfico de entrada al site'
-                value={pctEntrada}
-                onChange={setPctEntrada}
-                placeholder='Ej: 12'
-                tooltip='GA4 → Informes → Páginas y pantallas → divide las sesiones de esta URL entre las sesiones totales del site × 100. Te dice cuánto peso tiene esta página en el total.'
-              />
+            {/* Upload */}
+            <CsvUploadSimple
+              label='Subir CSV exportado de GA4'
+              hint='Columnas: dispositivo, tipo_usuario, sesiones, tiempo_medio, tasa_rebote, eventos_sesion, pagina_salida, conversiones, cvr'
+              parsed={csvRutas}
+              setter={setCsvRutas}
+              refEl={refCsvRutas}
+            />
+            <p style={{...T.small,textAlign:'center',margin:'8px 0'}}>— o pega la tabla copiada directamente de GA4 —</p>
+            <PasteCsvBox parsed={csvRutas} setter={setCsvRutas}/>
 
-              <KpiInput
-                label='Tasa de salida (%)'
-                value={tasaSalida}
-                onChange={setTasaSalida}
-                placeholder='Ej: 34'
-                tooltip='GA4 → Informes → Páginas y pantallas → columna "Tasa de salida". Es el % de usuarios que salen del site desde esta página. Diferente al rebote: el rebote entra y sale sin navegar, la salida puede ocurrir después de visitar varias páginas.'
-              />
-            </div>
-
-            <div>
-              <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'5px'}}>
-                <label style={T.label}>Posición en el funnel</label>
-                <Tooltip text='Define en qué momento del proceso de compra está esta página. Afecta directamente a cómo simula la IA la intención del usuario: no es lo mismo llegar a una homepage que a un checkout.'/>
+            {csvRutas&&(()=>{const sum=csvSummary(csvRutas);if(!sum) return(
+              <div style={{marginTop:'10px',padding:'10px 12px',background:C.greenDim,border:`1px solid rgba(0,212,170,0.2)`,borderRadius:'8px',fontSize:'12px',color:C.green,lineHeight:'1.6'}}>
+                ✓ <strong>{csvRutas.rows.length} segmentos detectados.</strong>
               </div>
-              <select value={posicionFunnel} onChange={e=>setPosicionFunnel(e.target.value)}
-                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:posicionFunnel?C.txt:C.txtDim,fontSize:'13px',outline:'none',marginBottom:'12px'}}>
-                <option value=''>Seleccionar posición...</option>
-                <optgroup label='— Captación'>
-                  <option value='entrada'>Página de entrada — primer contacto con el site</option>
-                  <option value='landing'>Landing de campaña — tráfico de pago directo</option>
-                </optgroup>
-                <optgroup label='— Consideración'>
-                  <option value='categoria'>Categoría — está explorando opciones</option>
-                  <option value='busqueda'>Resultados de búsqueda interna</option>
-                  <option value='producto'>Ficha de producto — evaluando en detalle</option>
-                  <option value='comparador'>Comparador — entre varias opciones</option>
-                </optgroup>
-                <optgroup label='— Decisión'>
-                  <option value='carrito'>Carrito — intención alta, aún puede abandonar</option>
-                  <option value='checkout'>Checkout — proceso de compra iniciado</option>
-                  <option value='pago'>Página de pago — último paso antes de convertir</option>
-                </optgroup>
-                <optgroup label='— Post-conversión'>
-                  <option value='confirmacion'>Confirmación de pedido</option>
-                  <option value='cuenta'>Mi cuenta / área privada</option>
-                </optgroup>
-              </select>
-            </div>
+            );
+            return(
+              <div style={{marginTop:'12px'}}>
+                {sum.sospechoso?(
+                  <div style={{padding:'10px 12px',background:C.amberDim,border:`1px solid rgba(245,166,35,0.25)`,borderRadius:'8px',fontSize:'12px',color:C.amber,lineHeight:'1.6',marginBottom:'8px'}}>
+                    ⚠️ Algunos valores no parecen correctos — revisa el formato de los datos pegados (puede que GA4 haya exportado con coma decimal y se haya interpretado mal).
+                  </div>
+                ):(
+                  <div style={{padding:'8px 12px',background:C.greenDim,border:`1px solid rgba(0,212,170,0.2)`,borderRadius:'8px',fontSize:'12px',color:C.green,marginBottom:'8px'}}>
+                    ✓ Datos leídos correctamente — {sum.segmentos} segmentos detectados
+                  </div>
+                )}
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px'}}>
+                  <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px'}}>
+                    <p style={T.label}>Sesiones</p>
+                    <p style={{fontSize:'16px',fontWeight:700,color:C.txt,marginTop:'4px'}}>{Math.round(sum.totalSesiones).toLocaleString()}</p>
+                  </div>
+                  <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px'}}>
+                    <p style={T.label}>CVR medio</p>
+                    <p style={{fontSize:'16px',fontWeight:700,color:C.txt,marginTop:'4px'}}>{sum.cvrMedio!==null?sum.cvrMedio.toFixed(2)+'%':'—'}</p>
+                  </div>
+                  <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px'}}>
+                    <p style={T.label}>% Rebote</p>
+                    <p style={{fontSize:'16px',fontWeight:700,color:C.txt,marginTop:'4px'}}>{sum.reboteMedio!==null?sum.reboteMedio.toFixed(1)+'%':'—'}</p>
+                  </div>
+                </div>
+                {Object.keys(sum.porDispositivo).length>0&&(
+                  <div style={{marginTop:'8px',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px'}}>
+                    <p style={{...T.label,marginBottom:'6px'}}>Desglose por dispositivo</p>
+                    {Object.entries(sum.porDispositivo).map(([d,ses])=>(
+                      <div key={d} style={{display:'flex',justifyContent:'space-between',fontSize:'12px',color:C.txtMid,padding:'3px 0'}}>
+                        <span style={{textTransform:'capitalize'}}>{d.includes('mobile')?'📱':d.includes('desktop')?'💻':'📟'} {d}</span>
+                        <span style={{color:C.txt}}>{Math.round(ses).toLocaleString()} sesiones ({((ses/sum.totalSesiones)*100).toFixed(0)}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {sum.fechaMin&&sum.fechaMax&&<p style={{...T.small,marginTop:'6px'}}>📅 Período detectado: {sum.fechaMin} → {sum.fechaMax}</p>}
+              </div>
+            );})()}
           </Card>
 
-          {/* Heatmaps */}
+          {/* Datos cualitativos — mapas de calor */}
           <Card style={{marginBottom:'12px'}}>
             <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
               <p style={T.h3}>Mapas de calor</p>
@@ -2254,69 +2374,12 @@ Devuelve SOLO JSON:
             </div>
           </Card>
 
-          {/* CSV sesiones de la URL — protagonista */}
-          <Card style={{marginBottom:'12px',border:`1px solid ${C.accent}`}}>
-            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
-              <p style={T.h3}>Sesiones de esta página por segmento</p>
-              <Tag color='purple'>Clave para los perfiles</Tag>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px',marginTop:'12px'}}>
+            <Btn variant='ghost' onClick={onSaveDraft}>💾 Guardar borrador</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
+              <Btn disabled={!url} onClick={()=>setTsub(1)}>Generar perfiles →</Btn>
             </div>
-            <p style={{...T.body,marginBottom:'14px'}}>
-              Este CSV es el dato más importante del test. Cada fila se convierte en un arquetipo con comportamiento real anclado a esa URL — tiempo en página, rebote, interacción y CVR real por segmento.
-            </p>
-
-            {/* Tabla ejemplo */}
-            <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',marginBottom:'14px',overflowX:'auto'}}>
-              <p style={{...T.label,marginBottom:'8px',color:C.accent}}>Estructura esperada — cada fila = un arquetipo de perfil</p>
-              <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
-                <thead>
-                  <tr style={{borderBottom:`1px solid ${C.border}`}}>
-                    {['dispositivo','tipo_usuario','sesiones','tiempo_medio','tasa_rebote','eventos_sesion','pagina_salida','conversiones','cvr'].map(h=>(
-                      <th key={h} style={{padding:'4px 8px',textAlign:'left',color:C.accent,fontWeight:600,whiteSpace:'nowrap'}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ['mobile','nuevo','1.240','48s','71%','1.2','/carrito','10','0.8%'],
-                    ['mobile','recurrente','380','95s','28%','3.1','/checkout','15','3.9%'],
-                    ['desktop','nuevo','520','142s','38%','2.8','/categoria','11','2.1%'],
-                    ['desktop','recurrente','210','240s','9%','5.4','—','14','6.8%'],
-                  ].map((row,i)=>(
-                    <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?'transparent':'#0A0A16'}}>
-                      {row.map((cell,j)=>(
-                        <td key={j} style={{padding:'5px 8px',color:j<=1?C.txt:j===8?C.green:C.txtMid,whiteSpace:'nowrap'}}>{cell}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p style={{...T.small,marginTop:'8px',color:C.txtDim}}>
-                La IA usará <span style={{color:C.green}}>sesiones</span> para distribuir perfiles · <span style={{color:C.green}}>tiempo + rebote + eventos</span> para simular comportamiento · <span style={{color:C.green}}>cvr</span> para anclar prob_conversion
-              </p>
-            </div>
-
-            {/* Tutorial desplegable */}
-            <TutorialGa4/>
-
-            {/* Upload */}
-            <CsvUploadSimple
-              label='Subir CSV exportado de GA4'
-              hint='Columnas: dispositivo, tipo_usuario, sesiones, tiempo_medio, tasa_rebote, eventos_sesion, pagina_salida, conversiones, cvr'
-              parsed={csvRutas}
-              setter={setCsvRutas}
-              refEl={refCsvRutas}
-            />
-
-            {csvRutas&&(
-              <div style={{marginTop:'10px',padding:'10px 12px',background:C.greenDim,border:`1px solid rgba(0,212,170,0.2)`,borderRadius:'8px',fontSize:'12px',color:C.green,lineHeight:'1.6'}}>
-                ✓ <strong>{csvRutas.rows.length} segmentos detectados.</strong> Cada uno generará perfiles sintéticos con comportamiento real anclado a sus datos de sesión.
-              </div>
-            )}
-          </Card>
-
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'12px'}}>
-            <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
-            <Btn disabled={!url} onClick={()=>setTsub(1)}>Generar perfiles →</Btn>
           </div>
         </div>
       )}
@@ -2406,7 +2469,10 @@ Devuelve SOLO JSON:
 
           <div style={{display:'flex',justifyContent:'space-between',marginTop:'4px'}}>
             <Btn variant='ghost' onClick={()=>setTsub(0)}>Atrás</Btn>
-            <Btn onClick={()=>setTsub(2)}>Continuar →</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={handleSaveDraft}>💾 Guardar borrador</Btn>
+              <Btn onClick={()=>setTsub(2)}>Continuar →</Btn>
+            </div>
           </div>
         </div>
       )}
@@ -2510,6 +2576,7 @@ Devuelve SOLO JSON:
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'12px'}}>
             <Btn variant='ghost' onClick={()=>setTsub(1)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={handleSaveDraft}>💾 Guardar borrador</Btn>
               <Btn variant='ghost' onClick={()=>{setProfiles(null);generarPerfiles();}}>
                 {profiles?'Regenerar':'Generar perfiles'}
               </Btn>
@@ -2627,9 +2694,12 @@ Devuelve SOLO JSON:
           </Card>
 
           {errSim&&<p style={{color:C.red,fontSize:'12px',marginBottom:'8px'}}>⚠ {errSim}</p>}
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setTsub(2)}>Atrás</Btn>
-            <Btn disabled={!hip||!varA||!varB} onClick={simular}>Simular →</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={handleSaveDraft}>💾 Guardar borrador</Btn>
+              <Btn disabled={!hip||!varA||!varB} onClick={simular}>Simular →</Btn>
+            </div>
           </div>
         </div>
       )}
@@ -2670,9 +2740,12 @@ Devuelve SOLO JSON:
               ))}
             </Card>
           )}
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setTsub(3)}>Revisar</Btn>
-            <Btn variant='green' onClick={()=>setTsub(5)}>Lanzar test →</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={handleSaveDraft}>💾 Guardar borrador</Btn>
+              <Btn variant='green' onClick={()=>setTsub(5)}>Lanzar test →</Btn>
+            </div>
           </div>
         </div>
       )}
@@ -2914,10 +2987,19 @@ function App(){
   }
   function addProject(p){setProjects(prev=>upsertProjects(prev,p));setView({screen:'detail',project:p});}
   function saveDraft(p){setProjects(prev=>upsertProjects(prev,p));}
+  function upsertTests(tests,t){
+    return tests.some(x=>x.id===t.id) ? tests.map(x=>x.id===t.id?t:x) : [...tests,t];
+  }
   function addTest(projectId,t){
-    setProjects(prev=>prev.map(p=>p.id===projectId?{...p,tests:[...p.tests,t]}:p));
+    setProjects(prev=>prev.map(p=>p.id===projectId?{...p,tests:upsertTests(p.tests,t)}:p));
     const updatedProject=projects.find(p=>p.id===projectId);
-    setView({screen:'detail',project:{...updatedProject,tests:[...updatedProject.tests,t]}});
+    setView({screen:'detail',project:{...updatedProject,tests:upsertTests(updatedProject.tests,t)}});
+  }
+  // Guardar borrador: persiste el test a medias y vuelve al proyecto, sin exigir que el flujo esté completo
+  function saveTestDraft(projectId,t){
+    setProjects(prev=>prev.map(p=>p.id===projectId?{...p,tests:upsertTests(p.tests,t)}:p));
+    const updatedProject=projects.find(p=>p.id===projectId);
+    setView({screen:'detail',project:{...updatedProject,tests:upsertTests(updatedProject.tests,t)}});
   }
 
   const currentProject=view.project?projects.find(p=>p.id===view.project.id)||view.project:null;
@@ -2929,10 +3011,10 @@ function App(){
         {nav==='projects'&&(
           <>
             {view.screen==='list'&&<ProjectsList projects={projects} onSelect={p=>setView({screen:'detail',project:p})} onCreate={()=>setView({screen:'create'})}/>}
-            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} apiKey={apiKey} onUpdateProject={p=>setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr))} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView({screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
+            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} apiKey={apiKey} onUpdateProject={p=>setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr))} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView(t.status==='borrador'?{screen:'newtest',project:currentProject,testDraft:t}:{screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
             {view.screen==='create'&&<CreateProject apiKey={apiKey} onSave={addProject} onSaveDraft={saveDraft} onCancel={()=>setView({screen:'list'})}/>}
             {view.screen==='edit'&&currentProject&&<CreateProject apiKey={apiKey} initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));}} onSaveDraft={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
-            {view.screen==='newtest'&&currentProject&&<CreateTest project={currentProject} apiKey={apiKey} onSave={t=>addTest(currentProject.id,t)} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
+            {view.screen==='newtest'&&currentProject&&<CreateTest project={currentProject} apiKey={apiKey} initial={view.testDraft} onSave={t=>addTest(currentProject.id,t)} onSaveDraft={t=>saveTestDraft(currentProject.id,t)} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='report'&&currentProject&&<ReportView project={currentProject} test={view.test} results={view.test?.results} onBack={()=>setView({screen:'detail',project:currentProject})}/>}
           </>
         )}
