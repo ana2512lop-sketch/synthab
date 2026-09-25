@@ -118,7 +118,7 @@ function EditableName({name,onChange}){
   );
 }
 
-function Tooltip({text}){
+function Tooltip({text,title}){
   const [show,setShow]=useState(false);
   return(
     <div style={{position:'relative',display:'inline-flex'}}>
@@ -131,7 +131,7 @@ function Tooltip({text}){
       </div>
       {show&&(
         <div style={{position:'absolute',bottom:'22px',left:'50%',transform:'translateX(-50%)',background:'#1A1A35',border:`1px solid ${C.borderHi}`,borderRadius:'8px',padding:'10px 12px',fontSize:'11px',color:C.txtMid,lineHeight:'1.6',width:'260px',zIndex:100,boxShadow:'0 4px 20px rgba(0,0,0,0.4)'}}>
-          <div style={{color:C.accent,fontWeight:600,marginBottom:'4px',fontSize:'10px',textTransform:'uppercase',letterSpacing:'0.05em'}}>Dónde encontrarlo</div>
+          <div style={{color:C.accent,fontWeight:600,marginBottom:'4px',fontSize:'10px',textTransform:'uppercase',letterSpacing:'0.05em'}}>{title||'Dónde encontrarlo'}</div>
           {text}
           <div style={{position:'absolute',bottom:'-5px',left:'50%',transform:'translateX(-50%)',width:'8px',height:'8px',background:'#1A1A35',border:`1px solid ${C.borderHi}`,borderBottom:'none',borderRight:'none',transform:'translateX(-50%) rotate(225deg)'}}/>
         </div>
@@ -225,14 +225,15 @@ const PILOT_RESULTS={
 };
 
 // ── CLAUDE API ────────────────────────────────────────────────────────────
-async function callClaude(apiKey,messages,system){
+async function callClaude(apiKey,messages,system,maxTokens){
   const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:4096,system,messages})
+    body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:maxTokens||4096,system,messages})
   });
   const data=await res.json();
   if(!data.content) throw new Error(data.error?data.error.message:'Error API');
+  if(data.stop_reason==='max_tokens') throw new Error('La respuesta se cortó por ser demasiado larga (reduce el número de métricas secundarias o vuelve a intentarlo).');
   return data.content.map(b=>b.text||'').join('');
 }
 function parseJSON(raw){
@@ -262,6 +263,24 @@ function toNum(v){
   }
   return parseFloat(s);
 }
+// GA4 suele incluir una fila 'Total' resumen antes de las filas por segmento. Si se cuela,
+// el desglose por dispositivo la trata como un dispositivo más (con 0 sesiones) y puede
+// duplicar el recuento — la quitamos antes de calcular nada.
+function stripTotalRow(csv){
+  if(!csv||!csv.rows||!csv.rows.length) return csv;
+  const h=csv.headers;
+  const hDisp=h.find(x=>/dispositivo|device|categor/i.test(x));
+  if(!hDisp) return csv;
+  const rows=csv.rows.filter(r=>{
+    const v=String(r[hDisp]||'').trim().toLowerCase();
+    return v!=='total'&&v!=='totales'&&v!=='';
+  });
+  if(rows.length===csv.rows.length) return csv;
+  const firstLine=(csv.raw||'').split('\n')[0]||'';
+  const sep=firstLine.includes('\t')?'\t':firstLine.includes(';')?';':',';
+  const rawLines=[h.join(sep),...rows.map(r=>h.map(hh=>r[hh]).join(sep))];
+  return {...csv,rows,raw:rawLines.join('\n')};
+}
 // Muchos ecommerce no tienen la columna 'cvr' en GA4 — solo sesiones y transacciones/conversiones.
 // Si detecta ambas y no hay cvr, la calcula por fila y la añade al CSV (headers, rows y raw),
 // así el prompt de generación de perfiles siempre tiene un CVR real anclado, aunque el cliente no lo exportara.
@@ -286,6 +305,7 @@ function withComputedCvr(csv){
 }
 // Calcula un resumen de KPIs (CVR, sesiones, rebote, desglose por dispositivo) a partir del CSV subido,
 // para confirmar visualmente que se ha leído bien antes de generar perfiles
+const DEVICE_VOCAB=/mobile|m[oó]vil|desktop|escritorio|tablet|smart\s?tv/i;
 function csvSummary(csv){
   if(!csv||!csv.rows||!csv.rows.length) return null;
   const h=csv.headers;
@@ -304,8 +324,11 @@ function csvSummary(csv){
     if(hCvr){const c=toNum(r[hCvr]);if(!isNaN(c)){cvrPeso+=c*ses;cvrFilas+=ses;}}
     if(hRebote){const rb=toNum(r[hRebote]);if(!isNaN(rb)){rebotePeso+=rb*ses;reboteFilas+=ses;}}
     if(hDisp){
-      const d=(r[hDisp]||'otros').toLowerCase();
-      porDispositivo[d]=(porDispositivo[d]||0)+ses;
+      const raw=(r[hDisp]||'').toString().trim();
+      // Si la celda no parece un dispositivo real (mobile/desktop/tablet), no la mostramos como si lo fuera —
+      // cae en "otros" en vez de ensuciar la tabla con basura de una columna mal alineada.
+      const d = raw && DEVICE_VOCAB.test(raw) ? raw.toLowerCase() : (raw?'otros':null);
+      if(d) porDispositivo[d]=(porDispositivo[d]||0)+ses;
     }
     if(hFecha&&r[hFecha]){
       if(fechaMin===null||r[hFecha]<fechaMin) fechaMin=r[hFecha];
@@ -316,6 +339,270 @@ function csvSummary(csv){
   const reboteMedio = reboteFilas? rebotePeso/reboteFilas : null;
   const sospechoso = totalSes<=0 || (cvrMedio!==null && (cvrMedio>100||cvrMedio<0));
   return {totalSesiones:totalSes,segmentos:csv.rows.length,cvrMedio,reboteMedio,porDispositivo,fechaMin,fechaMax,sospechoso};
+}
+
+// Calcula, a partir del resultado de la simulación y el tráfico real aproximado que dio el usuario,
+// el impacto de negocio estimado: usuarios/mes, CVR de cada variante, uplift, PTB (confianza de que
+// B gana) y una estimación de valor mensual por variante (tráfico × CVR × ticket medio).
+function resumenPrimario(r,traficoMensual,ticket){
+  if(!r) return null;
+  const totalUsuarios=toNum(traficoMensual);
+  const cvrA=r.cvr_a!=null?Number(r.cvr_a):null;
+  const cvrB=r.cvr_b!=null?Number(r.cvr_b):null;
+  const upliftPct=r.uplift_cvr!=null?Number(r.uplift_cvr):null;
+  const ptb=r.confianza!=null?Number(r.confianza):null;
+  const ticketNum=toNum(ticket);
+  const hayVolumen=totalUsuarios>0;
+  const valorA=(hayVolumen&&cvrA!=null&&!isNaN(ticketNum))?(totalUsuarios*(cvrA/100)*ticketNum):null;
+  const valorB=(hayVolumen&&cvrB!=null&&!isNaN(ticketNum))?(totalUsuarios*(cvrB/100)*ticketNum):null;
+  return {totalUsuarios:hayVolumen?totalUsuarios:null,cvrA,cvrB,upliftPct,ptb,valorA,valorB,ticketNum:isNaN(ticketNum)?null:ticketNum};
+}
+
+// Tarjeta "Resultados de las métricas primarias" — el resumen de negocio, no solo el % simulado
+function ResumenPrimarioCard({r,traficoMensual,ticket}){
+  const s=resumenPrimario(r,traficoMensual,ticket);
+  if(!s) return null;
+  const fmtMoney=v=>v==null?'—':Math.round(v).toLocaleString('es-ES')+' €';
+  const rango=(r.metricas&&r.metricas[0]&&Array.isArray(r.metricas[0].rango_uplift)&&r.metricas[0].rango_uplift.length===2)?r.metricas[0].rango_uplift:null;
+  const items=[
+    {label:'Total usuarios / mes',value:s.totalUsuarios!=null?s.totalUsuarios.toLocaleString('es-ES'):'—',
+      help:'El tráfico mensual real que indicaste en el paso "Métricas" para esta página. Es la base sobre la que se calcula el impacto estimado en € y en conversiones.'},
+    {label:'CR Control estimado',value:s.cvrA!=null?s.cvrA.toFixed(2)+'%':'—',
+      help:'La tasa de conversión que el modelo estima para la variante A (Control), a partir del comportamiento simulado de los arquetipos.'},
+    {label:'CR Variante estimado',value:s.cvrB!=null?s.cvrB.toFixed(2)+'%':'—',
+      help:'La tasa de conversión que el modelo estima para la variante B, tras aplicar el cambio propuesto en la hipótesis.'},
+    {label:'Uplift estimado',value:s.upliftPct!=null?(s.upliftPct>0?'+':'')+s.upliftPct.toFixed(1)+'%':'—',
+      help:'Mejora relativa de B sobre A: (CR variante − CR control) / CR control × 100. Es una estimación del modelo, no un resultado observado con tráfico real.'},
+    {label:'Rango estimado del uplift',value:rango?`${rango[0]>0?'+':''}${rango[0]}% a ${rango[1]>0?'+':''}${rango[1]}%`:'—',
+      help:'El uplift no es un número exacto — este rango refleja cuánto podría variar la estimación según el escenario (dispositivo, canal, precisión de los datos base).'},
+    {label:'Probabilidad predictiva de mejora',value:s.ptb!=null?s.ptb+'%':'—',
+      help:'Probabilidad, según el modelo, de que la variante B sea realmente mejor. No es significancia estadística de un test real — viene de repetir el mismo modelo generativo, no de tráfico independiente.'},
+    {label:'Estim. valor control / mes',value:fmtMoney(s.valorA),
+      help:'Ingresos mensuales estimados si se mantuviera el Control: tráfico real × CR control × ticket medio del proyecto.'},
+    {label:'Estim. valor variante / mes',value:fmtMoney(s.valorB),
+      help:'Ingresos mensuales estimados si se implementara la Variante: tráfico real × CR variante × ticket medio del proyecto.'},
+  ];
+  return(
+    <Card style={{marginBottom:'12px'}}>
+      <p style={{...T.label,marginBottom:'10px'}}>Resultados de las métricas primarias</p>
+      {!s.totalUsuarios&&<p style={{...T.small,color:C.amber,marginBottom:'8px'}}>⚠ Añade el tráfico mensual aproximado en el paso "Métricas" para ver la estimación de valor en €.</p>}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+        {items.map(it=>(
+          <div key={it.label} style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'5px'}}>
+              <p style={T.label}>{it.label}</p>
+              <Tooltip title='Qué es' text={it.help}/>
+            </div>
+            <p style={{fontSize:'15px',fontWeight:700,color:C.txt,marginTop:'3px'}}>{it.value}</p>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+// Tabla "Resultados por métrica configurada" — usa el array genérico de la IA (r.metricas) si existe;
+// si el resultado es antiguo y no lo trae, cae a los 3 campos fijos que había antes (compatibilidad).
+// Genera una curva de convergencia simulada (día a día) hacia el valor final de cada variante.
+// No es un histórico real — es una representación visual honesta de "cómo habría evolucionado",
+// determinista por métrica+variante (misma métrica siempre da la misma curva).
+function genTrendSeries(finalA,finalB,seed,days){
+  days=days||14;
+  let s=0; for(let i=0;i<seed.length;i++) s=(s*31+seed.charCodeAt(i))>>>0;
+  function rnd(){ s=(s*1103515245+12345)>>>0; return (s%1000)/1000; }
+  function seriesFor(final){
+    const arr=[];
+    let v=final*(0.6+rnd()*0.5);
+    for(let d=0;d<days;d++){
+      const t=d/(days-1);
+      const noise=(rnd()-0.5)*Math.abs(final)*0.15*(1-t*0.7);
+      v=v+(final-v)*0.35+noise;
+      arr.push(v);
+    }
+    arr[arr.length-1]=final;
+    return arr;
+  }
+  return {a:seriesFor(finalA),b:seriesFor(finalB)};
+}
+
+// Gráfica de línea dibujada a mano en SVG — sin dependencias externas
+function MiniLineChart({seriesA,seriesB,colorA,colorB,unidad}){
+  const all=[...seriesA,...seriesB];
+  const min=Math.min(...all),max=Math.max(...all);
+  const pad=(max-min)*0.15||Math.abs(max)*0.1||1;
+  const yMin=min-pad,yMax=max+pad;
+  const W=560,H=170,ML=42,MB=10,MT=10,MR=10;
+  const n=seriesA.length;
+  const x=i=>ML+(i/(n-1))*(W-ML-MR);
+  const y=v=>MT+(1-(v-yMin)/((yMax-yMin)||1))*(H-MT-MB);
+  const path=arr=>arr.map((v,i)=>`${i===0?'M':'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const fmtY=v=>unidad==='€'?v.toFixed(1)+'€':unidad==='segundos'?v.toFixed(0)+'s':unidad&&unidad!=='%'&&unidad!=='número'?v.toFixed(1):unidad==='número'?Math.round(v):v.toFixed(2)+'%';
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',display:'block'}}>
+      {[0,0.25,0.5,0.75,1].map(t=>{
+        const yy=MT+t*(H-MT-MB);
+        const val=yMax-t*(yMax-yMin);
+        return(
+          <g key={t}>
+            <line x1={ML} x2={W-MR} y1={yy} y2={yy} stroke={C.border} strokeWidth='1'/>
+            <text x={ML-6} y={yy+3} textAnchor='end' fontSize='9' fill={C.txtDim}>{fmtY(val)}</text>
+          </g>
+        );
+      })}
+      <path d={path(seriesA)} fill='none' stroke={colorA} strokeWidth='2'/>
+      <path d={path(seriesB)} fill='none' stroke={colorB} strokeWidth='2'/>
+    </svg>
+  );
+}
+
+// Tabla + gráfica de UNA métrica, estilo VWO (Variación · Conversiones/Visitantes · Tasa esperada · Mejora · Probabilidad de ser mejor)
+function MetricDetailView({metric,index,r,varAName,varBName,traficoMensual}){
+  const sesA=r.sesiones_a||0,sesB=r.sesiones_b||0;
+  const isPct=!metric.unidad||metric.unidad==='%';
+  const valA=Number(metric.valor_a)||0,valB=Number(metric.valor_b)||0;
+  const convA=isPct?Math.round(sesA*valA/100):Math.round(valA);
+  const convB=isPct?Math.round(sesB*valB/100):Math.round(valB);
+  const deltaAbs=valB-valA; // diferencia absoluta — en puntos si es %, en la unidad si no
+  const upliftRel=valA!==0?((valB-valA)/Math.abs(valA))*100:null; // uplift ESTIMADO relativo — % de mejora sobre el control
+  const esRebote=/rebote|abandono|salida/i.test(metric.nombre);
+  const bGana=esRebote?valB<valA:valB>valA;
+  const ptb=metric.confianza!=null?Number(metric.confianza):(index===0?r.confianza:null);
+  const rango=Array.isArray(metric.rango_uplift)&&metric.rango_uplift.length===2?metric.rango_uplift:null;
+  const trafico=parseInt(traficoMensual)||0;
+  const impactoConv=(isPct&&trafico>0)?Math.round(trafico*deltaAbs/100):null;
+  const trend=genTrendSeries(valA,valB,metric.nombre+index);
+  const fmtVal=v=>metric.unidad==='€'?v.toFixed(2)+'€':metric.unidad==='segundos'?v.toFixed(0)+'s':metric.unidad==='número'?Math.round(v).toLocaleString():v.toFixed(2)+'%';
+  const pasos=['Visitantes','Conversiones','CR','Uplift estimado','Prob. predictiva','Impacto'];
+  return(
+    <div>
+      {metric.desc&&<p style={{...T.small,marginBottom:'10px'}}>{metric.desc}</p>}
+
+      {/* El mismo criterio siempre, sea cual sea el tamaño de muestra */}
+      <div style={{display:'flex',alignItems:'center',gap:'4px',marginBottom:'14px',overflowX:'auto',paddingBottom:'2px'}}>
+        {pasos.map((s,i)=>(
+          <React.Fragment key={s}>
+            <span style={{whiteSpace:'nowrap',padding:'3px 9px',borderRadius:'10px',background:'#0A0A18',border:`1px solid ${C.border}`,fontSize:'10px',color:C.txtDim}}>{i+1}. {s}</span>
+            {i<pasos.length-1&&<span style={{color:C.txtDim,fontSize:'10px'}}>→</span>}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* 1-3: Visitantes · Conversiones · CR — los datos crudos, sin interpretar todavía */}
+      <div style={{overflowX:'auto',marginBottom:'12px'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px',minWidth:'420px'}}>
+          <thead>
+            <tr style={{borderBottom:`1px solid ${C.border}`,color:C.txtDim,textAlign:'left'}}>
+              <th style={{padding:'6px 8px',fontWeight:600}}>Variación</th>
+              <th style={{padding:'6px 8px',fontWeight:600}}>1. Visitantes (simulados)</th>
+              <th style={{padding:'6px 8px',fontWeight:600}}>2. {isPct?'Conversiones':'Valor bruto'}</th>
+              <th style={{padding:'6px 8px',fontWeight:600}}>3. CR estimado</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{borderBottom:`1px solid ${C.border}`}}>
+              <td style={{padding:'8px'}}><Tag color='default'>C</Tag> {varAName||'Control'}</td>
+              <td style={{padding:'8px',color:C.txtMid}}>{sesA.toLocaleString()}</td>
+              <td style={{padding:'8px',color:C.txtMid}}>{isPct?convA.toLocaleString():fmtVal(valA)}</td>
+              <td style={{padding:'8px',fontWeight:600,color:C.txt}}>{fmtVal(valA)}</td>
+            </tr>
+            <tr>
+              <td style={{padding:'8px'}}><Tag color='purple'>V1</Tag> {varBName||'Variación 1'}</td>
+              <td style={{padding:'8px',color:C.txtMid}}>{sesB.toLocaleString()}</td>
+              <td style={{padding:'8px',color:C.txtMid}}>{isPct?convB.toLocaleString():fmtVal(valB)}</td>
+              <td style={{padding:'8px',fontWeight:600,color:C.txt}}>{fmtVal(valB)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style={{...T.small,marginTop:'4px'}}>"Visitantes simulados" son repeticiones del mismo modelo, no personas reales distintas — por eso el CR es una estimación, no una tasa observada.</p>
+      </div>
+
+      {/* 4: Uplift ESTIMADO — SIEMPRE con su rango, nunca un único número suelto */}
+      <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',marginBottom:'10px'}}>
+        <p style={{...T.label,marginBottom:'8px'}}>4. Uplift estimado — cuánto podría mejorar</p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:rango?'8px':0}}>
+          <div>
+            <p style={T.small}>Diferencia absoluta</p>
+            <p style={{fontSize:'16px',fontWeight:700,color:C.txt}}>{deltaAbs>0?'+':''}{deltaAbs.toFixed(2)}{isPct?' p.p.':metric.unidad==='€'?'€':metric.unidad==='segundos'?'s':''}</p>
+          </div>
+          <div>
+            <p style={T.small}>Uplift relativo estimado</p>
+            <p style={{fontSize:'16px',fontWeight:700,color:bGana?C.green:C.red}}>{upliftRel!=null?(upliftRel>0?'+':'')+upliftRel.toFixed(1)+'%':'—'}</p>
+          </div>
+        </div>
+        {rango&&(
+          <p style={{fontSize:'12px',color:C.txtMid}}>Rango estimado: <strong style={{color:C.txt}}>{rango[0]>0?'+':''}{rango[0]}% a {rango[1]>0?'+':''}{rango[1]}%</strong> — cuánto podría variar según el escenario</p>
+        )}
+        <p style={{...T.small,marginTop:'8px'}}>La diferencia absoluta son puntos ganados; el uplift relativo es el % de mejora sobre el control. No son lo mismo — y ambos son estimaciones del modelo, no un resultado observado.</p>
+      </div>
+
+      {/* 5: Probabilidad predictiva — SEPARADA del uplift a propósito, nunca se mezclan. NO es significancia estadística real. */}
+      <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',marginBottom:'10px'}}>
+        <p style={{...T.label,marginBottom:'8px'}}>5. Probabilidad predictiva de mejora</p>
+        {ptb!=null?(
+          <>
+            <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'6px'}}>
+              <div style={{flex:1,height:'8px',background:C.border,borderRadius:'4px',position:'relative'}}>
+                <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${Math.min(ptb,100)}%`,background:C.accent,borderRadius:'4px'}}/>
+              </div>
+              <span style={{fontSize:'14px',fontWeight:700,color:C.txt}}>{ptb}%</span>
+            </div>
+            <p style={{...T.small}}>Según el modelo, esta es la probabilidad de que {varBName||'la variante'} sea mejor. <strong style={{color:C.txt}}>No es significancia estadística</strong> — no viene de tráfico real independiente, sino de repetir el mismo modelo generativo. Trátala como una señal orientativa, no como una certeza.</p>
+          </>
+        ):<p style={T.small}>Sin dato de probabilidad para esta métrica.</p>}
+      </div>
+
+      {/* 6: Impacto de negocio — traducción a conversiones reales, siempre con la recomendación de validar */}
+      <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'10px 12px',marginBottom:'14px'}}>
+        <p style={{...T.label,marginBottom:'6px'}}>6. Impacto de negocio</p>
+        {impactoConv!=null?(
+          <p style={{fontSize:'13px',color:C.txt}}>
+            Con tu tráfico real (~{trafico.toLocaleString()} usuarios/mes), esta mejora equivaldría a <strong style={{color:bGana?C.green:C.red}}>{impactoConv>0?'+':''}{impactoConv.toLocaleString()} conversiones/mes</strong> estimadas.
+          </p>
+        ):<p style={T.small}>Añade el tráfico mensual en el paso "Métricas" para ver el impacto estimado en conversiones reales.</p>}
+        <p style={{...T.small,marginTop:'6px',color:C.amber}}>📋 Recomendación: validar mediante un test A/B real con tráfico antes de implementar de forma definitiva.</p>
+      </div>
+
+      <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px',flexWrap:'wrap',gap:'6px'}}>
+          <p style={T.label}>Evolución simulada</p>
+          <div style={{display:'flex',gap:'12px',fontSize:'11px'}}>
+            <span style={{color:C.accent}}>● {varAName||'Control'}</span>
+            <span style={{color:C.green}}>● {varBName||'Variación 1'}</span>
+          </div>
+        </div>
+        <MiniLineChart seriesA={trend.a} seriesB={trend.b} colorA={C.accent} colorB={C.green} unidad={metric.unidad}/>
+        <p style={{...T.small,marginTop:'6px'}}>Curva de convergencia simulada a partir del resultado final — no es un histórico real día a día.</p>
+      </div>
+    </div>
+  );
+}
+
+// Selector de métricas (principal + secundarias) — clic para ver tabla y gráfica de cada una
+function MetricExplorer({r,varAName,varBName,traficoMensual}){
+  const metricas=(r.metricas&&r.metricas.length)?r.metricas:[
+    {nombre:'Tasa de conversión',valor_a:r.cvr_a,valor_b:r.cvr_b,unidad:'%',confianza:r.confianza},
+    r.clics_cta_a!=null?{nombre:'Clics en CTA',valor_a:r.clics_cta_a,valor_b:r.clics_cta_b,unidad:'%'}:null,
+    r.rebote_a!=null?{nombre:'Tasa de rebote',valor_a:r.rebote_a,valor_b:r.rebote_b,unidad:'%'}:null,
+  ].filter(Boolean);
+  const [active,setActive]=useState(0);
+  if(!metricas.length) return null;
+  return(
+    <Card style={{marginBottom:'20px'}}>
+      <p style={{...T.label,marginBottom:'10px'}}>Resultados por métrica</p>
+      <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginBottom:'14px'}}>
+        {metricas.map((m,i)=>(
+          <button key={m.nombre+i} onClick={()=>setActive(i)}
+            style={{display:'flex',alignItems:'center',gap:'6px',padding:'6px 12px',borderRadius:'20px',
+              border:`1px solid ${active===i?C.accent:C.border}`,background:active===i?C.accentDim:'transparent',
+              color:active===i?C.accent:C.txtMid,fontSize:'12px',cursor:'pointer',whiteSpace:'nowrap'}}>
+            <span style={{fontSize:'9px',fontWeight:700,background:i===0?C.accent:C.border,color:i===0?'#fff':C.txtDim,borderRadius:'50%',width:'16px',height:'16px',display:'inline-flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>M{i+1}</span>
+            {m.nombre}{i===0?' ⭐':''}
+          </button>
+        ))}
+      </div>
+      <MetricDetailView metric={metricas[active]} index={active} r={r} varAName={varAName} varBName={varBName} traficoMensual={traficoMensual}/>
+    </Card>
+  );
 }
 
 // ── NAV ───────────────────────────────────────────────────────────────────
@@ -413,7 +700,7 @@ const ARQUETIPOS_BASE=[
   {n:'El abandonador de checkout',need:'Identificar fricción final.',consciencia:'4-5 — intención alta, algo puntual lo frena',senales:'Add-to-cart + checkout sin purchase.',rec:'Email de recuperación de carrito, mostrar costes totales antes, checkout más corto.'},
 ];
 
-function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,onViewTest,onViewReport}){
+function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,onViewTest,onViewReport,onDeleteTest}){
   const statusColor={completado:'green',enCurso:'amber','en curso':'amber',borrador:'default'};
   const [openArch,setOpenArch]=useState(null);
   const [genArch,setGenArch]=useState(false);
@@ -421,7 +708,7 @@ function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,o
   const [statusFilter,setStatusFilter]=useState('all');
   const [sortAsc,setSortAsc]=useState(false);
 
-  const bloquesDatos=[project.exp1Data,project.exp2Data,project.exp3Data,project.busquedaCsv,project.vozCsv,project.funnelVolCsv,project.funnelDispCsv,project.crm?.csv,project.kpisCsv];
+  const bloquesDatos=[project.exp1Data,project.exp2Data,project.exp3Data,project.busquedaCsv,project.busquedaSegmentoCsv,project.vozCsv,project.funnelVolCsv,project.funnelDispCsv,project.crm?.csv,project.kpisCsv];
   const fuentesCargadas=bloquesDatos.filter(Boolean).length;
   const ultimaActualizacion=Object.values(project.timestamps||{}).sort().slice(-1)[0]||project.createdAt;
 
@@ -590,13 +877,21 @@ function ProjectDetail({project,apiKey,onUpdateProject,onBack,onEdit,onNewTest,o
                     <span style={T.h3}>{t.name}</span>
                     <Tag color={statusColor[t.status]||'default'}>{t.status}</Tag>
                   </div>
-                  <p style={{...T.mono,fontSize:'11px'}}>{t.url}</p>
+                  <p style={{...T.mono,fontSize:'11px',color:t.url?C.green:C.txtDim}}>{t.url||'Sin URL todavía — abre el borrador para completarlo'}</p>
                 </div>
                 {t.ganador&&(
                   <div style={{textAlign:'right',marginLeft:'16px'}}>
                     <div style={{fontSize:'18px',fontWeight:700,color:C.green}}>{t.uplift}</div>
                     <div style={T.small}>Variante {t.ganador} gana</div>
                   </div>
+                )}
+                {onDeleteTest&&(
+                  <button
+                    onClick={e=>{e.stopPropagation();if(window.confirm(`¿Eliminar "${t.name}"? Esta acción no se puede deshacer.`))onDeleteTest(t.id);}}
+                    title='Eliminar test'
+                    style={{background:'none',border:'none',cursor:'pointer',color:C.txtDim,fontSize:'14px',padding:'4px 8px',marginLeft:'8px',flexShrink:0}}>
+                    🗑
+                  </button>
                 )}
               </div>
             </Card>
@@ -891,6 +1186,8 @@ function CreateProject({onSave, onSaveDraft, onCancel, initial, apiKey}){
   const [canalConversion,setCanalConversion]=useState(initial?.canalConversion||'');
   const [busquedaCsv,setBusquedaCsv]=useState(initial?.busquedaCsv||null);
   const refBusqueda=useRef();
+  const [busquedaSegmentoCsv,setBusquedaSegmentoCsv]=useState(initial?.busquedaSegmentoCsv||null);
+  const refBusquedaSegmento=useRef();
   const [vozCsv,setVozCsv]=useState(initial?.vozCsv||null);
   const refVoz=useRef();
 
@@ -926,20 +1223,30 @@ function CreateProject({onSave, onSaveDraft, onCancel, initial, apiKey}){
 
   function score(){
     let s=0;
-    if(cvr&&sesiones&&ticket) s+=40;
+    // Núcleo — ancla directa de comportamiento/CVR (80 pts)
+    if(cvr&&sesiones&&ticket) s+=25;
     if(rebote) s+=5;
-    if(exp1) s+=20;
+    if(exp1) s+=15;
     if(exp2) s+=10;
     if(exp3) s+=10;
     if(canales.some(c=>c.canal)) s+=5;
     if(crmSeleccionado||crmCsv) s+=10;
+    // Contexto cualitativo y funnel — antes no contaban para nada (20 pts)
+    if(busquedaCsv) s+=3;
+    if(busquedaSegmentoCsv) s+=3;
+    if(vozCsv) s+=3;
+    if(Object.keys(funnelQualImgs).length) s+=3;
+    if(funnelVolCsv) s+=4;
+    if(funnelDispCsv) s+=4;
     return Math.min(s,100);
   }
 
   function handleFile(f,setter,key){
     if(!f) return;
     const r=new FileReader();
-    r.onload=e=>{const p=parseCSV(e.target.result);if(p){setter({...p,fileName:f.name});if(key) touch(key);}};
+    // Igual que en el CSV del test: si trae sesiones+transacciones pero no CVR, se calcula solo.
+    // Y si trae una fila 'Total' de resumen de GA4, se quita antes de nada.
+    r.onload=e=>{const p=parseCSV(e.target.result);if(p){setter({...withComputedCvr(stripTotalRow(p)),fileName:f.name});if(key) touch(key);}};
     r.readAsText(f,'UTF-8');
   }
 
@@ -1108,6 +1415,7 @@ function CreateProject({onSave, onSaveDraft, onCancel, initial, apiKey}){
       exp2: exp2? fmtCsvBlock(exp2):null,
       exp3: exp3? fmtCsvBlock(exp3):null,
       busqueda: busquedaCsv? fmtCsvBlock(busquedaCsv):null,
+      busquedaSegmento: busquedaSegmentoCsv? fmtCsvBlock(busquedaSegmentoCsv):null,
       voz: vozCsv? fmtCsvBlock(vozCsv):null,
       funnelQual: Object.keys(funnelQualImgs).length||Object.keys(checkoutStepImgs).length? `Capturas subidas para: ${Object.keys(funnelQualImgs).join(', ')}${checkoutSteps.length?', Checkout ('+checkoutSteps.map(s=>s.nombre).join(', ')+')':''}.`:null,
       funnelVol: funnelVolCsv? fmtCsvBlock(funnelVolCsv):null,
@@ -1148,6 +1456,7 @@ function CreateProject({onSave, onSaveDraft, onCancel, initial, apiKey}){
       exp2Data:exp2?{fileName:exp2.fileName,headers:exp2.headers,rows:exp2.rows||[]}:null,
       exp3Data:exp3?{fileName:exp3.fileName,headers:exp3.headers,rows:exp3.rows||[]}:null,
       busquedaCsv:busquedaCsv?{fileName:busquedaCsv.fileName,headers:busquedaCsv.headers,rows:busquedaCsv.rows||[]}:null,
+      busquedaSegmentoCsv:busquedaSegmentoCsv?{fileName:busquedaSegmentoCsv.fileName,headers:busquedaSegmentoCsv.headers,rows:busquedaSegmentoCsv.rows||[]}:null,
       vozCsv:vozCsv?{fileName:vozCsv.fileName,headers:vozCsv.headers,rows:vozCsv.rows||[]}:null,
       funnelQualImgs,checkoutSteps,checkoutStepImgs,
       funnelVolCsv:funnelVolCsv?{fileName:funnelVolCsv.fileName,headers:funnelVolCsv.headers,rows:funnelVolCsv.rows||[]}:null,
@@ -1307,8 +1616,8 @@ function CreateProject({onSave, onSaveDraft, onCancel, initial, apiKey}){
             <p style={{...T.body,marginBottom:'14px'}}>Rutas reales por segmento. Diferencias entre conversor y no conversor. Período recomendado: últimos 90 días (mínimo).</p>
             <CSVBox parsed={exp3} refEl={ref3} setter={setExp3} k='exp3'
               label='CSV de la Exploración 3'
-              hint='Exploración de rutas filtrada por segmento (canal, dispositivo, conversores)'
-              tutorial={<span>1. GA4 → <b>Explorar → Exploración de rutas</b><br/>2. Nodo inicio: Página de destino<br/>3. Dimensiones: Título página · Nombre evento · Búsqueda interna<br/>4. Aplica segmentos: Por canal · Por dispositivo · Por conversores<br/>5. Exportar CSV</span>}
+              hint='Nodo inicio: Página de destino · Tipos de nodo: Título de página, Nombre de evento, Búsqueda interna · Métrica del nodo: Recuento de eventos'
+              tutorial={<span>1. GA4 → <b>Explorar → Exploración de rutas</b><br/>2. Nodo inicio: Página de destino (tu URL)<br/>3. Tipo de nodo (define qué se muestra en cada rama): Título de página y clase de pantalla · Nombre de evento · Término de búsqueda<br/>4. Métrica del nodo (arriba a la derecha, controla el ancho de cada rama): <b>Recuento de eventos</b> — o cambia a Usuarios activos si prefieres ver personas en vez de eventos<br/>5. Aplica segmentos: Por canal · Por dispositivo · Por conversores (para comparar quién convierte y quién no)<br/>6. Exportar CSV</span>}
             />
             <InsightBlock k='exp3'/>
           </Card>
@@ -1333,14 +1642,27 @@ function CreateProject({onSave, onSaveDraft, onCancel, initial, apiKey}){
           </Card>
 
           <Card style={{marginBottom:'12px'}}>
-            <CardHeader title='Búsqueda interna del sitio' k='busqueda' tag={<Tag color='amber'>Opcional</Tag>}/>
-            <p style={{...T.body,marginBottom:'10px'}}>Qué escribe la gente en el buscador — la señal más directa de intención y nivel de consciencia. Período recomendado: últimos 30-90 días.</p>
+            <CardHeader title='Comportamiento tras la búsqueda' k='busqueda' tag={<Tag color='amber'>Opcional</Tag>}/>
+            <p style={{...T.body,marginBottom:'10px'}}>Qué hace el usuario después de buscar: a qué página va, si convierte, si la búsqueda no encuentra nada. Período recomendado: últimos 30-90 días.</p>
             <DataBox parsedCsv={busquedaCsv} refCsv={refBusqueda} setterCsv={setBusquedaCsv} k='busqueda'
-              label='CSV de búsqueda interna' hint='Columnas: término buscado, nº búsquedas, CVR tras búsqueda'
-              tutorial={<span>GA4 → Informes → Interacción → <b>Búsqueda en el sitio</b> → Exportar CSV</span>}
+              label='CSV de comportamiento tras búsqueda'
+              hint='Columnas: término buscado, sesiones con búsqueda, página de destino tras búsqueda, CVR tras búsqueda, % búsquedas sin resultados'
+              tutorial={<span>GA4 → Informes → Interacción → <b>Búsqueda en el sitio</b> → añade "Página de destino" y "% búsquedas sin resultados" como dimensiones secundarias → Exportar CSV</span>}
               imgVal={null} refImg={null} setterImg={()=>{}}
             />
             <InsightBlock k='busqueda'/>
+          </Card>
+
+          <Card style={{marginBottom:'12px'}}>
+            <CardHeader title='Términos más buscados por segmento' k='busquedaSegmento' tag={<Tag color='amber'>Opcional</Tag>}/>
+            <p style={{...T.body,marginBottom:'10px'}}>Qué escribe cada tipo de usuario en el buscador — mobile busca distinto que desktop, y un nuevo distinto que un recurrente. Período recomendado: últimos 30-90 días.</p>
+            <DataBox parsedCsv={busquedaSegmentoCsv} refCsv={refBusquedaSegmento} setterCsv={setBusquedaSegmentoCsv} k='busquedaSegmento'
+              label='CSV de términos por segmento'
+              hint='Columnas: término buscado, dispositivo, tipo usuario, nº búsquedas, CVR'
+              tutorial={<span>1. GA4 → <b>Explorar → Exploración en blanco</b><br/>2. Dimensiones (filas): Término buscado · Categoría de dispositivo · Tipo de usuario<br/>3. Métricas: Vistas de búsqueda en el sitio · Sesiones · CVR<br/>4. Últimos 30-90 días → Exportar CSV</span>}
+              imgVal={null} refImg={null} setterImg={()=>{}}
+            />
+            <InsightBlock k='busquedaSegmento'/>
           </Card>
 
           <Card style={{marginBottom:'12px'}}>
@@ -1860,6 +2182,208 @@ function VarianteDesign({label, color, imgName, setImgName, figma, setFigma, ref
   );
 }
 
+// Fila compacta de variante, estilo tabla VWO — badge + descripción + captura/figma en una sola línea
+// Categorías de segmentación, con combinaciones (no solo un dispositivo a la vez)
+const SEGMENT_CATEGORIES=[
+  {cat:'Dispositivo',options:[
+    {v:'todos',label:'Todos los dispositivos'},
+    {v:'mobile',label:'Solo mobile'},
+    {v:'desktop',label:'Solo desktop'},
+    {v:'tablet',label:'Solo tablet'},
+    {v:'mobile_tablet',label:'Mobile y Tablet'},
+    {v:'desktop_tablet',label:'Desktop y Tablet'},
+  ]},
+  {cat:'Tipo de usuario',options:[
+    {v:'todos',label:'Todos los usuarios'},
+    {v:'nuevo',label:'Solo nuevos'},
+    {v:'recurrente',label:'Solo recurrentes'},
+  ]},
+  {cat:'Canal de entrada',options:[
+    {v:'todos',label:'Todos los canales'},
+    {v:'organico',label:'Orgánico / SEO'},
+    {v:'paid',label:'Paid (SEM/Social)'},
+    {v:'email',label:'Email / Newsletter'},
+    {v:'social',label:'Social orgánico'},
+    {v:'directo',label:'Directo'},
+  ]},
+];
+const DISPOSITIVO_LABEL={todos:'Todos',mobile:'Mobile',desktop:'Desktop',tablet:'Tablet',mobile_tablet:'Mobile, Tablet',desktop_tablet:'Desktop, Tablet'};
+// Compara el valor de dispositivo de una fila del CSV contra el segmento elegido (soporta combinaciones)
+function matchDispositivo(d,seg){
+  if(!d) return false;
+  d=String(d).toLowerCase();
+  if(seg==='todos') return true;
+  if(seg==='mobile_tablet') return d.includes('mobile')||d.includes('tablet');
+  if(seg==='desktop_tablet') return d.includes('desktop')||d.includes('tablet');
+  return d.includes(seg);
+}
+
+// Selector de segmentos estilo VWO: buscador + categorías desplegables a la izquierda, vista previa en lenguaje natural a la derecha
+function SegmentPicker({segDispositivo,setSegDispositivo,segTipo,setSegTipo,segCanal,setSegCanal}){
+  const [q,setQ]=useState('');
+  const [openCat,setOpenCat]=useState('Dispositivo');
+  const valueMap={Dispositivo:[segDispositivo,setSegDispositivo],'Tipo de usuario':[segTipo,setSegTipo],'Canal de entrada':[segCanal,setSegCanal]};
+  const filtered=SEGMENT_CATEGORIES
+    .map(c=>({...c,options:c.options.filter(o=>o.label.toLowerCase().includes(q.toLowerCase())||c.cat.toLowerCase().includes(q.toLowerCase()))}))
+    .filter(c=>c.options.length);
+  return(
+    <Card style={{marginBottom:'12px',padding:0,overflow:'hidden'}}>
+      <div style={{padding:'14px 16px',borderBottom:`1px solid ${C.border}`}}>
+        <p style={T.h3}>Segmentos</p>
+        <p style={{...T.small,marginTop:'2px'}}>A quién va dirigido este test. La IA usará solo las filas relevantes del CSV para anclar los perfiles a ese segmento.</p>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr'}}>
+        <div style={{borderRight:`1px solid ${C.border}`}}>
+          <div style={{padding:'10px'}}>
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder='Buscar segmento...'
+              style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'7px 10px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+          </div>
+          <div style={{maxHeight:'320px',overflowY:'auto'}}>
+            {filtered.map(cat=>{
+              const [val,setVal]=valueMap[cat.cat];
+              const open=openCat===cat.cat||q;
+              return(
+                <div key={cat.cat}>
+                  <div onClick={()=>setOpenCat(openCat===cat.cat?null:cat.cat)}
+                    style={{padding:'8px 12px',fontSize:'12px',fontWeight:600,color:C.txt,cursor:'pointer',display:'flex',justifyContent:'space-between',background:'#0A0A18'}}>
+                    <span>{cat.cat} ({cat.options.length})</span>
+                    <span style={{color:C.txtDim}}>{open?'▾':'▸'}</span>
+                  </div>
+                  {open&&cat.options.map(o=>(
+                    <div key={o.v} onClick={()=>setVal(o.v)}
+                      style={{padding:'7px 12px 7px 22px',fontSize:'12px',cursor:'pointer',display:'flex',alignItems:'center',gap:'6px',
+                        color:val===o.v?C.accent:C.txtMid,background:val===o.v?C.accentDim:'transparent'}}>
+                      <span style={{width:'12px',flexShrink:0}}>{val===o.v?'✓':''}</span>{o.label}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{padding:'16px'}}>
+          <p style={{...T.label,marginBottom:'8px'}}>Este test se dirige a</p>
+          <p style={{fontSize:'13px',color:C.txtMid,marginBottom:'4px'}}>Todos los visitantes</p>
+          <p style={{fontSize:'13px',color:C.txtDim,marginBottom:'6px'}}>donde</p>
+          <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+            <p style={{fontSize:'13px',color:C.txt}}><strong style={{color:C.accent}}>Dispositivo</strong> es igual a {DISPOSITIVO_LABEL[segDispositivo]}</p>
+            {segTipo!=='todos'&&<p style={{fontSize:'13px',color:C.txt}}><strong style={{color:C.accent}}>Tipo de usuario</strong> es igual a {segTipo==='nuevo'?'Nuevo':'Recurrente'}</p>}
+            {segCanal!=='todos'&&<p style={{fontSize:'13px',color:C.txt}}><strong style={{color:C.accent}}>Canal</strong> es igual a {SEGMENT_CATEGORIES[2].options.find(o=>o.v===segCanal)?.label}</p>}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function VarianteRowVWO({badge,badgeColor,label,desc,setDesc,imgName,setImgName,figma,setFigma,refEl,placeholder}){
+  const [figmaOpen,setFigmaOpen]=useState(false);
+  const hasCapture=imgName||figma;
+  return(
+    <div style={{borderBottom:`1px solid ${C.border}`}}>
+      <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 12px',flexWrap:'wrap'}}>
+        <span style={{width:'24px',height:'24px',borderRadius:'50%',background:badgeColor+'22',color:badgeColor,fontSize:'10px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{badge}</span>
+        <span style={{fontSize:'12px',fontWeight:600,color:C.txt,width:'82px',flexShrink:0}}>{label}</span>
+        <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder={placeholder}
+          style={{flex:1,minWidth:'140px',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'6px 10px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+        <input ref={refEl} type='file' accept='.jpg,.jpeg,.png,.webp,.pdf' style={{display:'none'}}
+          onChange={e=>{if(e.target.files[0]){setImgName(e.target.files[0].name);setFigma('');setFigmaOpen(false);}}}/>
+        {hasCapture?(
+          <div style={{display:'flex',alignItems:'center',gap:'4px',background:badgeColor+'1A',color:badgeColor,borderRadius:'6px',padding:'5px 8px',fontSize:'11px',whiteSpace:'nowrap',flexShrink:0}}>
+            {imgName?`🖼 ${imgName.length>12?imgName.slice(0,12)+'…':imgName}`:'🔗 Figma'}
+            <button onClick={()=>{setImgName('');setFigma('');}} style={{background:'none',border:'none',color:badgeColor,cursor:'pointer',fontSize:'11px',padding:0}}>✕</button>
+          </div>
+        ):(
+          <div style={{display:'flex',gap:'4px',flexShrink:0}}>
+            <button onClick={()=>refEl.current.click()} title='Subir captura' style={{background:'none',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'6px 9px',fontSize:'12px',color:C.txtMid,cursor:'pointer'}}>📷</button>
+            <button onClick={()=>setFigmaOpen(v=>!v)} title='Link de Figma' style={{background:'none',border:`1px solid ${figmaOpen?badgeColor:C.border}`,borderRadius:'6px',padding:'6px 9px',fontSize:'12px',color:figmaOpen?badgeColor:C.txtMid,cursor:'pointer'}}>🔗</button>
+          </div>
+        )}
+      </div>
+      {figmaOpen&&!hasCapture&&(
+        <div style={{padding:'0 12px 10px 46px'}}>
+          <input value={figma} onChange={e=>setFigma(e.target.value)} placeholder='Pega el link de Figma / prototipo...' autoFocus
+            style={{width:'100%',background:'#070713',border:`1px solid ${badgeColor}`,borderRadius:'6px',padding:'6px 10px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Catálogo de métricas típicas — punto de partida "recomendado por la IA", editable siempre
+const METRIC_SUGGESTIONS=[
+  {nombre:'Tasa de conversión (CVR)',desc:'% de sesiones que completan la compra u objetivo del test',direccion:'increase'},
+  {nombre:'Clics en CTA principal',desc:'% de sesiones que hacen clic en el botón/CTA principal de la página',direccion:'increase'},
+  {nombre:'Añadidos al carrito',desc:'% de sesiones que añaden al menos un producto al carrito',direccion:'increase'},
+  {nombre:'Abandono de carrito',desc:'% de sesiones que añaden al carrito pero no completan la compra',direccion:'decrease'},
+  {nombre:'Tasa de rebote',desc:'% de sesiones que salen sin interactuar más allá de la primera página',direccion:'decrease'},
+  {nombre:'Scroll depth',desc:'% medio de la página que recorre el usuario haciendo scroll',direccion:'increase'},
+  {nombre:'Tiempo en página',desc:'Segundos medios que pasa el usuario en la página',direccion:'increase'},
+  {nombre:'Inicio de checkout',desc:'% de sesiones que llegan a iniciar el proceso de pago',direccion:'increase'},
+  {nombre:'Páginas por sesión',desc:'Número medio de páginas vistas por sesión',direccion:'increase'},
+  {nombre:'Ingresos por sesión',desc:'Ingresos medios generados por cada sesión, en €',direccion:'increase'},
+  {nombre:'Ticket medio (AOV)',desc:'Valor medio del pedido completado, en €',direccion:'increase'},
+  {nombre:'Transacciones totales',desc:'Número total de compras completadas',direccion:'increase'},
+];
+
+// Panel de detalle: nombre + qué mide/cómo se calcula + dirección de mejora — esto es lo que la IA
+// necesita para saber cómo derivar el dato, no solo el nombre de la métrica
+function MetricDetailPanel({metric,onChange,onConfirm,confirmLabel,onCancel}){
+  return(
+    <div style={{background:'#070713',border:`1px solid ${C.accent}`,borderRadius:'8px',padding:'14px'}}>
+      <label style={{...T.label,display:'block',marginBottom:'5px'}}>Nombre de la métrica <span style={{color:C.red}}>*</span></label>
+      <input value={metric.nombre} onChange={e=>onChange({...metric,nombre:e.target.value})} placeholder='Ej: CTR en botón "Continuar como invitado"'
+        style={{width:'100%',background:'#0A0A18',border:`1px solid ${metric.nombre.trim()?C.border:C.red}`,borderRadius:'6px',padding:'8px 10px',color:C.txt,fontSize:'13px',fontWeight:600,outline:'none',marginBottom:'12px'}}/>
+      <label style={{...T.label,display:'block',marginBottom:'5px'}}>Qué mide y cómo se calcula <Tag color='default'>Opcional</Tag></label>
+      <textarea value={metric.desc} onChange={e=>onChange({...metric,desc:e.target.value})}
+        placeholder='Ej: % de sesiones que hacen clic en el botón "Comprar ahora"...'
+        style={{width:'100%',minHeight:'54px',background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'8px 10px',color:C.txt,fontSize:'12px',outline:'none',resize:'vertical',marginBottom:'10px'}}/>
+      <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'12px'}}>
+        <span style={T.label}>Mejor si:</span>
+        <button onClick={()=>onChange({...metric,direccion:'increase'})}
+          style={{background:metric.direccion==='increase'?C.greenDim:'transparent',border:`1px solid ${metric.direccion==='increase'?C.green:C.border}`,color:metric.direccion==='increase'?C.green:C.txtMid,borderRadius:'6px',padding:'5px 10px',fontSize:'11px',cursor:'pointer'}}>↑ Aumenta</button>
+        <button onClick={()=>onChange({...metric,direccion:'decrease'})}
+          style={{background:metric.direccion==='decrease'?C.redDim:'transparent',border:`1px solid ${metric.direccion==='decrease'?C.red:C.border}`,color:metric.direccion==='decrease'?C.red:C.txtMid,borderRadius:'6px',padding:'5px 10px',fontSize:'11px',cursor:'pointer'}}>↓ Disminuye</button>
+      </div>
+      <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+        <Btn small onClick={onConfirm} disabled={!metric.nombre.trim()}>{confirmLabel}</Btn>
+        <Btn small variant='ghost' onClick={onCancel}>Cancelar</Btn>
+        {!metric.nombre.trim()&&<span style={{fontSize:'11px',color:C.red}}>Escribe el nombre arriba para poder usarla</span>}
+      </div>
+    </div>
+  );
+}
+
+// Buscador + lista de métricas típicas, con opción de crear una personalizada — estilo VWO
+function MetricPicker({onAdd,exclude,confirmLabel}){
+  const [q,setQ]=useState('');
+  const [editing,setEditing]=useState(null);
+  const filtered=METRIC_SUGGESTIONS.filter(m=>!exclude.includes(m.nombre.toLowerCase())&&m.nombre.toLowerCase().includes(q.toLowerCase()));
+  if(editing) return(
+    <MetricDetailPanel metric={editing} onChange={setEditing} confirmLabel={confirmLabel}
+      onConfirm={()=>{onAdd({...editing,nombre:editing.nombre.trim()});setEditing(null);setQ('');}}
+      onCancel={()=>setEditing(null)}/>
+  );
+  return(
+    <div>
+      <div style={{display:'flex',gap:'8px',marginBottom:'8px'}}>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder='Buscar métrica...'
+          style={{flex:1,background:'#070713',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'7px 10px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+        <Btn small variant='ghost' onClick={()=>setEditing({nombre:q,desc:'',direccion:'increase'})}>+ Crear personalizada</Btn>
+      </div>
+      <div style={{maxHeight:'170px',overflowY:'auto',border:`1px solid ${C.border}`,borderRadius:'8px'}}>
+        {filtered.length===0&&<p style={{...T.small,padding:'10px 12px'}}>Sin resultados — crea una personalizada con el botón de arriba.</p>}
+        {filtered.map(m=>(
+          <div key={m.nombre} onClick={()=>setEditing({...m})}
+            style={{padding:'9px 12px',fontSize:'12px',color:C.txtMid,cursor:'pointer',borderBottom:`1px solid ${C.border}`}}>
+            {m.nombre}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TutorialGa4(){
   const [open,setOpen]=useState(false);
   return(
@@ -1953,9 +2477,10 @@ function TutorialGa4(){
 }
 
 function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
-  const TSTEPS=['URL y página','Segmentación','Perfiles','Test','QA','Lanzar'];
+  const TSTEPS=['Entender experimento','Variantes y distribución','Métricas','Población','Perfiles','Resultados'];
   const testId=useRef(initial?.id||('t'+Date.now())).current;
   const d=initial?.draft||null; // borrador guardado, si venimos de retomar un test a medias
+  const [nombreTest,setNombreTest]=useState(d?.nombreTest||(initial&&initial.status!=='borrador'?initial.name:'')||'');
   const [tsub,setTsub]=useState(d?.tsub||0);
   const [url,setUrl]=useState(d?.url||'');
   const [pagina,setPagina]=useState(d?.pagina||'página de producto');
@@ -1966,7 +2491,6 @@ function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
   const [abandono,setAbandono]=useState('');
   const [pageImgs,setPageImgs]=useState(d?.pageImgs||{heatmapClics:null,heatmapScroll:null});
   const [csvRutas,setCsvRutas]=useState(d?.csvRutas||null);
-  const [contexto,setContexto]=useState(d?.contexto||'');
   const refCsvRutas=useRef();
   const refHeatClics=useRef();
   const refHeatScroll=useRef();
@@ -1981,6 +2505,15 @@ function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
   const [nSesiones,setNSesiones]=useState(1000);
   const [showManual,setShowManual]=useState(false);
   const [hip,setHip]=useState(d?.hip||'');
+  const [entenderLoading,setEntenderLoading]=useState(false);
+  const [entenderErr,setEntenderErr]=useState('');
+  const [preguntasIA,setPreguntasIA]=useState(d?.preguntasIA||[]);
+  const [respuestasIA,setRespuestasIA]=useState(d?.respuestasIA||{});
+  const [interpretacion,setInterpretacion]=useState(d?.interpretacion||null);
+  const [datosNecesarios,setDatosNecesarios]=useState(d?.datosNecesarios||null);
+  const [instruccionesExtra,setInstruccionesExtra]=useState(d?.instruccionesExtra||'');
+  const [datosExtraCsv,setDatosExtraCsv]=useState(d?.datosExtraCsv||null);
+  const refDatosExtra=useRef();
   const [varA,setVarA]=useState(d?.varA||'');
   const [varB,setVarB]=useState(d?.varB||'');
   const [imgB,setImgB]=useState(null);
@@ -1991,13 +2524,25 @@ function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
   const imgRef=useRef();
   const imgRefA=useRef();
 
-  const [metricaP,setMetricaP]=useState(d?.metricaP||'tasa de conversión');
-  const [metricaPCustom,setMetricaPCustom]=useState('');
-  const [metricasS,setMetricasS]=useState(d?.metricasS||[]);
+  const [metricaP,setMetricaP]=useState(d?.metricaP||'');
+  const [metricaPDesc,setMetricaPDesc]=useState(d?.metricaPDesc||'');
+  const [metricaPDireccion,setMetricaPDireccion]=useState(d?.metricaPDireccion||'increase');
+  const [metricaPRazon,setMetricaPRazon]=useState(d?.metricaPRazon||'');
+  const [baselineReal,setBaselineReal]=useState(d?.baselineReal||'');
+  const [baselineFuente,setBaselineFuente]=useState(d?.baselineFuente||'');
+  const [detectandoBaseline,setDetectandoBaseline]=useState(false);
+  const [errBaseline,setErrBaseline]=useState('');
+  const [recomendandoMetricas,setRecomendandoMetricas]=useState(false);
+  const [errMetricas,setErrMetricas]=useState('');
+  const [confirmarRedetectar,setConfirmarRedetectar]=useState(false);
+  const [addingSecondary,setAddingSecondary]=useState(false);
+  const [metricasS,setMetricasS]=useState((d?.metricasS||[]).map(m=>typeof m==='string'?{nombre:m,desc:'',direccion:'increase'}:m));
   const [split,setSplit]=useState(d?.split||50);
-  const [results,setResults]=useState(null);
+  const [traficoMensual,setTraficoMensual]=useState(d?.traficoMensual||'');
+  const [results,setResults]=useState(d?.results||null);
   const [loadingSim,setLoadingSim]=useState(false);
   const [errSim,setErrSim]=useState('');
+  const [draftSaved,setDraftSaved]=useState(false);
 
   // Helper: imagen upload para heatmaps
   function ImgUpload({label,hint,field,state,setter,refKey}){
@@ -2024,7 +2569,7 @@ function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
     function handleFile(f){
       if(!f) return;
       const r=new FileReader();
-      r.onload=e=>{const p=parseCSV(e.target.result);if(p) setter({...withComputedCvr(p),fileName:f.name});};
+      r.onload=e=>{const p=parseCSV(e.target.result);if(p) setter({...withComputedCvr(stripTotalRow(p)),fileName:f.name});};
       r.readAsText(f,'UTF-8');
     }
     return(
@@ -2053,7 +2598,7 @@ function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
     function handlePaste(v){
       setText(v);
       const p=parseCSV(v);
-      if(p) setter({...withComputedCvr(p),fileName:'Pegado desde GA4'});
+      if(p) setter({...withComputedCvr(stripTotalRow(p)),fileName:'Pegado desde GA4'});
     }
     if(!open&&!parsed) return(
       <button onClick={()=>setOpen(true)} style={{width:'100%',background:'none',border:`1px dashed ${C.border}`,borderRadius:'8px',padding:'8px',color:C.txtMid,fontSize:'12px',cursor:'pointer'}}>
@@ -2073,6 +2618,126 @@ function CreateTest({project,apiKey,onSave,onSaveDraft,onCancel,initial}){
 
   const paginas=['página de producto','homepage','checkout','categoría','carrito','landing de campaña','página de colección'];
   const metricas=['tasa de conversión','clics en CTA','tasa de rebote','tiempo en página','añadidos al carrito','ingresos por sesión'];
+
+  // La IA analiza el brief, y si le falta algo crítico pregunta UNA vez antes de interpretar el experimento.
+  // No debe repetir lo que el proyecto ya sabe (exp1/exp2/exp3, CRM, canales...).
+  async function entenderTest(respuestasExtra){
+    setEntenderLoading(true);setEntenderErr('');
+    try{
+      const datosProyecto=[
+        project.exp1Data?'Quién es el usuario (demografía, dispositivo)':null,
+        project.exp2Data?'Cómo llega (canal, adquisición)':null,
+        project.exp3Data?'Cómo navega (rutas, eventos)':null,
+        project.crm?.csv||project.crm?.plataforma?'CRM / datos de compra':null,
+        csvRutas?'Sesiones reales de esta URL (CSV ya subido)':null,
+      ].filter(Boolean);
+      const respTxt=Object.keys(respuestasExtra||{}).length?`\nRESPUESTAS DEL CRO A LAS PREGUNTAS ANTERIORES:\n${Object.entries(respuestasExtra).map(([q,a])=>`- ${q} → ${a}`).join('\n')}`:'';
+      const prompt=`Eres un CRO experto ayudando a preparar un test A/B antes de lanzarlo. No ejecutas la configuración a ciegas: primero entiendes el experimento.
+
+PROYECTO: sector ${project.sector}, CVR base ${project.kpis.cvr}%, ticket medio ${project.kpis.ticket}€
+DATOS QUE EL PROYECTO YA TIENE (no los vuelvas a pedir): ${datosProyecto.join(', ')||'ninguno todavía'}
+
+BRIEFING DEL CRO:
+URL a testar: ${url} (${pagina})
+Contexto, hipótesis y estrategia: ${hip}
+${respTxt}
+
+TAREA:
+1. Si falta información crítica para entender bien el experimento (y NO la puedes deducir razonablemente), genera hasta 5 preguntas cortas y específicas — nunca genéricas, nunca repitas algo que el briefing ya responde. Si ya tienes suficiente para interpretar el experimento con confianza, deja "preguntas" como array vacío.
+2. Si "preguntas" queda vacío, rellena "interpretacion" con una lectura estructurada del experimento (problema detectado, qué comportamiento se quiere modificar, la hipótesis causal, el elemento afectado, qué usuarios se ven potencialmente afectados, en qué momento del funnel ocurre, y el resultado esperado). Si "preguntas" NO está vacío, deja "interpretacion" en null — primero se responde, luego se interpreta.
+3. Cuando rellenes "interpretacion", rellena también "datos_necesarios": la lista de datos reales necesarios para construir un baseline fiable de ESTE experimento en concreto — usa primero lo que el proyecto ya tiene (márcalo "disponible":true), y pide después solo lo que falta ("disponible":false). Cada uno con prioridad (Necesario/Recomendado), fuente típica (GA4/Clarity/CRM/manual) y por qué hace falta.
+4. Rellena también "instrucciones_extra": pasos claros para conseguir de UNA SOLA VEZ, en UNA exploración de GA4 (o Clarity si aplica), TODOS los datos marcados como "disponible":false — combina sus dimensiones y métricas en una sola tabla exportable, no expliques cada uno por separado. Formato: pasos numerados cortos (GA4 → Explorar → Exploración en blanco → dimensiones: ... → métricas: ... → Exportar CSV). Si no falta nada, deja este campo vacío.
+
+Responde SOLO JSON:
+{"preguntas":["¿...?","¿...?"],
+"interpretacion":null,
+"datos_necesarios":[{"dato":"Usuarios en esta página","prioridad":"Necesario","fuente":"GA4","razon":"Dimensionar la población simulada","disponible":false}],
+"instrucciones_extra":"1. GA4 → Explorar...\\n2. Dimensiones: ...\\n3. Métricas: ...\\n4. Exportar CSV"}`;
+      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido, sin markdown ni texto extra.');
+      const parsed=parseJSON(raw);
+      if(parsed.preguntas&&parsed.preguntas.length){
+        setPreguntasIA(parsed.preguntas);
+        setInterpretacion(null);
+        setDatosNecesarios(null);
+        setInstruccionesExtra('');
+      }else{
+        setPreguntasIA([]);
+        setInterpretacion(parsed.interpretacion||null);
+        setDatosNecesarios(parsed.datos_necesarios||null);
+        setInstruccionesExtra(parsed.instrucciones_extra||'');
+      }
+    }catch(e){ setEntenderErr('Error: '+e.message); }
+    setEntenderLoading(false);
+  }
+
+  // Extrae el baseline REAL de la métrica principal a partir de los CSV ya subidos (no del CVR genérico
+  // de la página) — esto es lo que ancla el Control simulado, para no inventar un punto de partida distinto
+  // del real (el fallo típico: Control sintético al 9% cuando el histórico real está al 54%).
+  async function detectarBaseline(){
+    if(!metricaP) return;
+    setDetectandoBaseline(true);setErrBaseline('');
+    try{
+      const csvs=[
+        csvRutas?.raw&&`CSV de comportamiento de esta URL:\n${csvRutas.raw}`,
+        datosExtraCsv?.raw&&`CSV de datos adicionales (funnel/otros):\n${datosExtraCsv.raw}`,
+      ].filter(Boolean);
+      if(!csvs.length){
+        setErrBaseline('No hay ningún CSV subido todavía para detectar el baseline real — sube al menos el de comportamiento de la URL, en el paso "Entender experimento".');
+        setDetectandoBaseline(false);
+        return;
+      }
+      const prompt=`Eres un analista de datos. Busca el baseline histórico REAL de esta métrica concreta en los datos que te paso — no inventes ni promedies con otra cosa que no sea exactamente esta métrica.
+
+MÉTRICA PRINCIPAL DEL TEST: "${metricaP}"${metricaPDesc?` — ${metricaPDesc}`:''}
+CONTEXTO: ${hip}
+
+${csvs.join('\n\n')}
+
+TAREA: identifica en estos datos el valor real histórico (%) que más se acerque a esta métrica exacta. Si hay varias columnas candidatas, prioriza la más literal (ej: si la métrica es "CTR en botón continuar como invitado", busca clics/eventos de ese botón concreto sobre visitantes, NO la conversión general de la página). Si de verdad no hay ningún dato que sirva de baseline para esta métrica exacta, dilo claramente en vez de inventar un número.
+
+Responde SOLO JSON:
+{"baseline_pct":54.4,"fuente":"Columna 'sesiones_con_interaccion' / 'visitantes' del CSV de comportamiento, filas de esta URL","encontrado":true}
+Si no encuentras nada fiable: {"baseline_pct":null,"fuente":"","encontrado":false}`;
+      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido, sin markdown ni texto extra.');
+      const parsed=parseJSON(raw);
+      if(parsed.encontrado&&parsed.baseline_pct!=null){
+        setBaselineReal(String(parsed.baseline_pct));
+        setBaselineFuente(parsed.fuente||'');
+      }else{
+        setErrBaseline('No he encontrado en tus datos un baseline claro para esta métrica exacta — puedes introducirlo a mano si lo conoces, o el modelo estimará con criterio general (menos fiable).');
+      }
+    }catch(e){ setErrBaseline('Error: '+e.message); }
+    setDetectandoBaseline(false);
+  }
+
+  async function recomendarMetricas(){
+    setRecomendandoMetricas(true);setErrMetricas('');
+    try{
+      const prompt=`Eres un CRO experto. Ya conoces este experimento — recomienda las métricas antes de simular, no dejes que el usuario adivine.
+
+Sector: ${project.sector}. Hipótesis y estrategia: ${hip}
+URL: ${url} (${pagina}). Control: ${varA}. Variante: ${varB}.
+
+TAREA:
+1. Recomienda UNA métrica PRINCIPAL: la que representa de la forma más directa el éxito de ESTA hipótesis concreta (no una genérica). Explica en una frase por qué es la más directa.
+2. Recomienda CUATRO métricas SECUNDARIAS que, entre todas, cubran: un efecto downstream en el funnel, un posible efecto negativo/de fricción, un cambio de comportamiento, y el impacto de negocio (ingresos/ticket).
+Cada métrica lleva: nombre, descripción de cómo se mide, dirección de mejora (increase si más es mejor, decrease si menos es mejor).
+
+Responde SOLO JSON:
+{"principal":{"nombre":"...","desc":"...","direccion":"increase","razon":"..."},
+"secundarias":[{"nombre":"...","desc":"...","direccion":"increase"},{"nombre":"...","desc":"...","direccion":"increase"},{"nombre":"...","desc":"...","direccion":"decrease"},{"nombre":"...","desc":"...","direccion":"increase"}]}`;
+      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido, sin markdown ni texto extra.');
+      const parsed=parseJSON(raw);
+      if(parsed.principal){
+        setMetricaP(parsed.principal.nombre);
+        setMetricaPDesc(parsed.principal.desc||'');
+        setMetricaPDireccion(parsed.principal.direccion||'increase');
+        setMetricaPRazon(parsed.principal.razon||'');
+      }
+      if(parsed.secundarias?.length) setMetricasS(parsed.secundarias.slice(0,4));
+    }catch(e){ setErrMetricas('Error: '+e.message); }
+    setRecomendandoMetricas(false);
+  }
 
   async function generarPerfiles(){
     setLoadingP(true);setErrP('');
@@ -2097,13 +2762,17 @@ ${csvRutas.raw}
 IMPORTANTE: prob_conversion y tiempo_sesion_seg DEBEN venir del CVR y tiempo real del segmento correspondiente.`
 : `DATOS DEL PROYECTO (no hay CSV — infiere comportamiento del sector):
 CVR base: ${project.kpis.cvr}%, Mobile: ${project.kpis.mobile}%, Tipo compra: ${project.kpis.tipoCompra}, Recurrentes: ${project.kpis.recurrentes}%`}
+${datosExtraCsv?.raw?`\nDATOS ADICIONALES PEDIDOS POR "ENTENDER TEST" (funnel, distribución de opciones, scroll, abandono u otros según el experimento — úsalos para calibrar los campos de comportamiento relevantes a esta hipótesis):\n${datosExtraCsv.raw}`:''}
+${baselineReal?`\nBASELINE REAL DE LA MÉTRICA PRINCIPAL "${metricaP}": ${baselineReal}%${baselineFuente?` (fuente: ${baselineFuente})`:''}
+INSTRUCCIÓN CRÍTICA: la MEDIA de prob_conversion de todos los perfiles generados (el Control, sin aplicar ninguna variante todavía) debe converger a ${baselineReal}% — NO a otro número que te parezca razonable. Este es un dato real, no una estimación tuya. Si algún perfil individual se aleja mucho de este valor, tiene que ser por una razón clara del arquetipo (ej: el desconfiado convierte menos que la media); la MEDIA agregada de todos los perfiles NO puede alejarse del ${baselineReal}% real. Este es el fallo más grave que puedes cometer: inventar un baseline distinto del real.`:''}
 
 CONTEXTO: Sector ${project.sector}, Ticket ${project.kpis.ticket}€, URL: ${url} (${pagina})
 ${sesionesTotales?`Sesiones/mes: ${sesionesTotales}`:''}${pctEntrada?` · Entrada: ${pctEntrada}%`:''}${tasaSalida?` · Salida: ${tasaSalida}%`:''}${posicionFunnel?` · Funnel: ${posicionFunnel}`:''}
-${contexto?`\nCONTEXTO Y ESTRATEGIA DEL TEST (aportado por el usuario): ${contexto}`:''}
+${hip?`\nCONTEXTO Y ESTRATEGIA DEL TEST (aportado por el usuario): ${hip}`:''}
+${metricaP?`\nMÉTRICAS QUE SE VAN A MEDIR (asegúrate de que los campos de comportamiento de cada perfil permiten derivarlas después): ${[metricaP,...metricasS.map(m=>m.nombre)].join(', ')}`:''}
 
 SEGMENTO DEL TEST:
-- Dispositivo: ${segDispositivo==='todos'?'Todos':segDispositivo+' ÚNICAMENTE'}
+- Dispositivo: ${segDispositivo==='todos'?'Todos':DISPOSITIVO_LABEL[segDispositivo]+' ÚNICAMENTE'}
 - Tipo: ${segTipo==='todos'?'Todos':segTipo+' ÚNICAMENTE'}
 - Canal: ${segCanal==='todos'?'Todos':segCanal+' ÚNICAMENTE'}
 ${tieneSesiones?'Filtra el CSV por el segmento indicado y usa solo esas filas.':''}
@@ -2220,12 +2889,20 @@ Devuelve SOLO array JSON. Cada perfil DEBE tener todos estos campos:
         urgencia:p.urgencia, compara_alternativas:p.compara_alternativas,
         lee_resenas:p.lee_resenas, compra_impulsiva:p.compra_impulsiva,
       }));
+      const metricaPFinal = metricaP.trim();
+      const todasLasMetricas = [{nombre:metricaPFinal,desc:metricaPDesc,direccion:metricaPDireccion},...metricasS].filter(m=>m.nombre);
+      const fmtMetrica=m=>`${m.nombre}${m.desc?` — ${m.desc}`:''} (mejor si ${m.direccion==='decrease'?'DISMINUYE':'AUMENTA'})`;
       const prompt=`Motor simulación A/B. Sector: ${project.sector}. CVR base: ${project.kpis.cvr}%.
 URL: ${url}. Página: ${pagina}.
 Hipótesis: ${hip}.
 Variante A: ${varA}. Variante B: ${varB}.
-Métrica principal: ${metricaP}. Split: ${split}%A/${100-split}%B.
+Métrica principal: ${fmtMetrica(todasLasMetricas[0])}.
+Métricas secundarias: ${metricasS.length?metricasS.map(fmtMetrica).join('; '):'ninguna'}.
+Split: ${split}%A/${100-split}%B.
 Sesiones totales simuladas: ${totalSesiones.toLocaleString()} (${arquetipos.length} arquetipos × clones estadísticos).
+${traficoMensual?`Tráfico real aproximado de esta página: ${traficoMensual} usuarios/mes (usa esto solo como referencia de escala, no reescales las sesiones simuladas).`:''}
+${baselineReal?`\nBASELINE REAL OBSERVADO para "${metricaPFinal}": ${baselineReal}%${baselineFuente?` (fuente: ${baselineFuente})`:''}
+INSTRUCCIÓN CRÍTICA: cvr_a (Control) y el valor_a de la métrica principal DEBEN quedar muy cerca de ${baselineReal}% — es un dato real, no lo sustituyas por un número que "parezca razonable". Si tu cálculo agregado de los perfiles se aleja de ${baselineReal}% en más de 2-3 puntos, algo va mal en el razonamiento: revísalo y corrígelo antes de responder, no lo devuelvas así.`:''}
 
 ARQUETIPOS (cada uno representa un % del tráfico total):
 ${JSON.stringify(sample,null,2)}
@@ -2245,48 +2922,58 @@ LÓGICA:
 - Incluye en "segmentos" SOLO los arquetipos donde A y B muestran una diferencia real (no ruido estadístico) — si un arquetipo se comporta igual en A y en B, no lo incluyas
 - Dentro de cada segmento (arquetipo), añade "audiencias": 2-4 cruces relevantes por género, edad, dispositivo o canal SOLO si el patrón es realmente distinto dentro de ese arquetipo (no rellenes por rellenar — si todos los sub-grupos se comportan igual, deja audiencias como array vacío)
 - En "recomendaciones", ve más allá del ganador del test: usa lo que revelan los arquetipos para proponer 2-4 acciones concretas — pueden ser personalizaciones (mostrar variante distinta según arquetipo/audiencia) o propuestas de nuevos tests A/B derivados de lo que has visto. Cada una con su kpi_afectado y una estimación realista de retorno_esperado (rango %, no cifra falsa de precisión)
+- En "metricas", incluye UNA entrada por CADA métrica de esta lista, en el mismo orden, con el valor real estimado para A y para B según cómo reaccionan los arquetipos (no inventes un uplift genérico — cada métrica puede moverse de forma distinta e incluso en direcciones opuestas): ${JSON.stringify(todasLasMetricas)}
+- Cada métrica trae su propia descripción de cómo se mide y su dirección de mejora (increase/decrease) — úsalas literalmente para decidir el valor de cada variante; no asumas que "más" es siempre mejor, respeta la dirección indicada
+- IMPORTANTE — qué es realmente "confianza" aquí: NO es significancia estadística de un test real con tráfico independiente. Los perfiles sintéticos son repeticiones del mismo modelo generativo, no visitantes reales distintos. "confianza" (0-100) es tu PROBABILIDAD PREDICTIVA de que B sea mejor que A en esa métrica, dada la incertidumbre del modelo (variación entre arquetipos, canales, dispositivos, precisión de los datos base). Cada métrica lleva su propia confianza — no reutilices la misma para todas
+- Además, para cada métrica incluye "rango_uplift":[min,max] — un rango plausible del uplift relativo (%), no un único número, reflejando cuánto podría variar la estimación según el escenario (ej: si el uplift puntual es +11%, el rango podría ser [+4,+19]). Cuanto menos ancladas estén las métricas a datos reales (más suposición, menos histórico), más ancho debe ser el rango
+- La unidad de cada métrica según su tipo: % para tasas (conversión, rebote, engagement), número entero para conteos (transacciones, clics, añadidos al carrito), € para valores monetarios (ingresos por sesión, ticket medio), segundos para tiempo en página
 
 Devuelve SOLO JSON:
 {"ganador":"B","confianza":94,"uplift_cvr":8.4,"cvr_a":2.4,"cvr_b":2.6,"sesiones_a":${Math.round(totalSesiones*split/100)},"sesiones_b":${Math.round(totalSesiones*(100-split)/100)},"conversiones_a":0,"conversiones_b":0,"clics_cta_a":14,"clics_cta_b":18,"rebote_a":44,"rebote_b":41,
+"metricas":[{"nombre":"${metricaPFinal}","valor_a":0,"valor_b":0,"unidad":"%","confianza":94,"rango_uplift":[4,19]}],
 "segmentos":[{"nombre":"El desconfiado","poblacion":9,"resultado":"B gana","diff_pct":12,"razon":"Nuevo CTA transmite más confianza","audiencias":[{"tipo":"género","valor":"mujer","resultado":"B gana fuerte","diff_pct":18},{"tipo":"canal","valor":"Orgánico / SEO","resultado":"A gana leve","diff_pct":-4}]}],
 "razones_abandono":["razón 1","razón 2"],
 "insights":["insight 1","insight 2"],
 "recomendacion_general":"1-2 frases con la lectura global de qué hacer con este resultado",
 "recomendaciones":[{"titulo":"Personalizar CTA para el segmento 45+","tipo":"personalizacion","accion":"Mostrar la variante A (CTA original) a usuarios 45+ en vez de forzar la B ganadora","kpi_afectado":"Tasa de conversión 45+","retorno_esperado":"Evita una caída estimada del 6-8% de CVR en ese segmento"},{"titulo":"Test adicional: CTA con prueba social para El desconfiado","tipo":"nuevo_test","accion":"Probar una tercera variante con sello de confianza visible junto al CTA","kpi_afectado":"Tasa de rebote, CVR","retorno_esperado":"+3-5% CVR estimado en este arquetipo"}]}`;
-      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido.');
-      setResults(parseJSON(raw));setTsub(4);
+      const raw=await callClaude(apiKey,[{role:'user',content:prompt}],'Responde SOLO JSON válido.',8000);
+      setResults(parseJSON(raw));setTsub(5);
     }catch(e){setErrSim('Error: '+e.message);}
     setLoadingSim(false);
   }
 
   function handleSave(){
     const t={
-      id:testId,name:hip.slice(0,40)||'Nuevo test',url,status:'completado',
+      id:testId,name:nombreTest.slice(0,60)||'Test sin nombre',url,status:'completado',
       ganador:results?.ganador,uplift:results?(results.uplift_cvr>0?'+':'')+Number(results.uplift_cvr).toFixed(1)+'%':null,
-      createdAt:(initial&&initial.createdAt)||new Date().toISOString().slice(0,10),results
+      createdAt:(initial&&initial.createdAt)||new Date().toISOString().slice(0,10),results,traficoMensual,varA,varB
     };
     onSave(t);
   }
 
   // Guarda el progreso actual como borrador para poder retomarlo más tarde, sin perder lo ya rellenado
   function handleSaveDraft(){
+    const nombreBorrador=(nombreTest||`Borrador ${pagina} — ${new Date().toLocaleDateString('es-ES')}`).slice(0,60);
     const t={
-      id:testId,name:(hip||url||'Nuevo test').slice(0,40),url,status:'borrador',
+      id:testId,name:nombreBorrador,url,status:'en curso',
       ganador:null,uplift:null,
       createdAt:(initial&&initial.createdAt)||new Date().toISOString().slice(0,10),
       results:null,
       draft:{
-        tsub,url,pagina,contexto,csvRutas,pageImgs,
+        tsub,url,pagina,nombreTest,csvRutas,pageImgs,
         segDispositivo,segTipo,segCanal,nProfiles,profiles,
         hip,varA,varB,imgAName,imgBName,figmaUrlA,figmaUrl,
-        metricaP,metricasS,split
+        metricaP,metricaPDesc,metricaPDireccion,metricaPRazon,baselineReal,baselineFuente,metricasS,split,traficoMensual,results,
+        preguntasIA,respuestasIA,interpretacion,datosNecesarios,instruccionesExtra,datosExtraCsv
       }
     };
     (onSaveDraft||onSave)(t);
+    setDraftSaved(true);
+    setTimeout(()=>setDraftSaved(false),2000);
   }
 
   if(loadingP) return <Spinner text='Generando perfiles sintéticos...' sub={nProfiles>20?`Generando en lotes — ${nProfiles} perfiles en ${Math.ceil(nProfiles/20)} llamadas`:`Anclando al CVR real del proyecto (${project.kpis.cvr}%)`}/>;
-  if(loadingSim) return <Spinner text={`Simulando ${totalSesiones.toLocaleString()} sesiones...`} sub={`${arquetipos.length} arquetipos × variaciones estadísticas`}/>;
+  if(loadingSim) return <Spinner text={`Simulando ${(profiles?.total||0).toLocaleString()} sesiones...`} sub={`${profiles?.arquetipos?.length||0} arquetipos × variaciones estadísticas`}/>;
 
   return(
     <div className='fade' style={{padding:'28px 32px',maxWidth:'640px'}}>
@@ -2295,6 +2982,14 @@ Devuelve SOLO JSON:
         <span style={{color:C.txtDim}}>/</span>
         <span style={{fontSize:'13px',color:C.txt}}>Nuevo test</span>
       </div>
+
+      {/* Nombre del test — siempre visible y editable, en cualquier paso del flujo */}
+      <div style={{marginBottom:'14px'}}>
+        <label style={{...T.label,display:'block',marginBottom:'5px'}}>Nombre del test<span style={{color:C.red}}> *</span></label>
+        <input value={nombreTest} onChange={e=>setNombreTest(e.target.value)} placeholder='Ej: CTA checkout — botón verde vs azul'
+          style={{width:'100%',background:'#070713',border:`1px solid ${nombreTest?C.border:C.red}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'14px',fontWeight:600,outline:'none'}}/>
+      </div>
+
       <QualityBar score={project.quality}/>
 
       {/* step bar */}
@@ -2308,28 +3003,169 @@ Devuelve SOLO JSON:
 
       {tsub===0&&(
         <div>
+          {/* Contexto, hipótesis y estrategia */}
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'6px'}}>Contexto, hipótesis y estrategia</p>
+            <p style={{...T.body,marginBottom:'8px'}}>Qué problema has detectado, qué crees que pasará y por qué, y qué cambio propones.</p>
+            <textarea value={hip} onChange={e=>{setHip(e.target.value);setInterpretacion(null);setPreguntasIA([]);}}
+              placeholder='Ej: Creemos que el checkout tiene demasiados pasos y eso genera abandono en mobile. Queremos probar un checkout de un solo paso frente al actual porque el 71% del tráfico es mobile y el rebote en ese paso es del 44%...'
+              style={{width:'100%',minHeight:'80px',background:'#070713',border:`1px solid ${hip?C.border:C.red}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',resize:'vertical',fontFamily:'inherit'}}/>
+            <p style={{...T.small,marginTop:'4px'}}>Cambio propuesto + razón basada en datos + efecto esperado. <span style={{color:C.red}}>*</span></p>
+          </Card>
+
           {/* URL + tipo */}
           <Card style={{marginBottom:'12px'}}>
             <p style={{...T.h3,marginBottom:'14px'}}>URL de la página a testar</p>
-            <Input label='URL completa' value={url} onChange={setUrl} placeholder='https://tienda.com/producto/zapatillas' required hint='La IA usará esta URL para contextualizar el comportamiento de cada agente en esta página concreta.'/>
+            <Input label='URL completa' value={url} onChange={v=>{setUrl(v);setInterpretacion(null);setPreguntasIA([]);}} placeholder='https://tienda.com/producto/zapatillas' required hint='La IA usará esta URL para contextualizar el comportamiento de cada agente en esta página concreta.'/>
             <Select label='Tipo de página' value={pagina} onChange={setPagina} options={paginas}/>
           </Card>
 
-          {/* Contexto libre — qué quieres probar y por qué, antes de meterte en datos */}
-          <Card style={{marginBottom:'12px'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
-              <p style={T.h3}>Contexto y estrategia del test</p>
-              <Tag color='amber'>Opcional</Tag>
-            </div>
-            <p style={{...T.body,marginBottom:'10px'}}>
-              Apunta aquí qué quieres probar, tu hipótesis, o cualquier cosa de contexto que la IA deba tener en cuenta. No hace falta que esté definido del todo — puedes afinarlo luego en el paso "Test".
-            </p>
-            <textarea
-              value={contexto}
-              onChange={e=>setContexto(e.target.value)}
-              placeholder='Ej: Creemos que el checkout tiene demasiados pasos y eso genera abandono en mobile. Queremos probar un checkout de un solo paso frente al actual...'
-              style={{width:'100%',minHeight:'70px',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',resize:'vertical',fontFamily:'inherit'}}
-            />
+          {/* Entender el experimento — la IA interpreta el brief antes de pedir configuración */}
+          <Card style={{marginBottom:'12px',border:`1px solid ${C.accent}`}}>
+            <p style={{...T.h3,marginBottom:'6px'}}>Entender el experimento</p>
+            <p style={{...T.body,marginBottom:'12px'}}>Antes de configurar nada, la IA interpreta lo que quieres probar y te dice qué datos reales necesita para construir un baseline fiable.</p>
+
+            {!interpretacion&&!preguntasIA.length&&(
+              <Btn onClick={()=>entenderTest({})} disabled={!hip||!url||entenderLoading}>
+                {entenderLoading?'Analizando...':'✦ Entender test'}
+              </Btn>
+            )}
+            {entenderErr&&<p style={{color:C.red,fontSize:'12px',marginTop:'8px'}}>⚠ {entenderErr}</p>}
+
+            {/* Ronda de preguntas — la IA pregunta solo lo que le falta, una vez */}
+            {preguntasIA.length>0&&(
+              <div>
+                <p style={{...T.label,marginBottom:'10px'}}>Para entender bien el experimento, necesito saber:</p>
+                {preguntasIA.map((q,i)=>(
+                  <div key={i} style={{marginBottom:'10px'}}>
+                    <label style={{...T.small,display:'block',marginBottom:'4px'}}>{i+1}. {q}</label>
+                    <input value={respuestasIA[q]||''} onChange={e=>setRespuestasIA(prev=>({...prev,[q]:e.target.value}))}
+                      style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'7px 10px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+                  </div>
+                ))}
+                <Btn onClick={()=>entenderTest(respuestasIA)} disabled={entenderLoading}>
+                  {entenderLoading?'Analizando...':'Responder y entender test →'}
+                </Btn>
+              </div>
+            )}
+
+            {/* Interpretación estructurada — editable volviendo a la hipótesis de arriba */}
+            {interpretacion&&(
+              <div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
+                  {[
+                    ['Problema detectado',interpretacion.problema],
+                    ['Comportamiento a modificar',interpretacion.comportamiento_modificar],
+                    ['Hipótesis causal',interpretacion.hipotesis_causal],
+                    ['Elemento afectado',interpretacion.elemento_afectado],
+                    ['Usuarios afectados',interpretacion.usuarios_afectados],
+                    ['Momento del funnel',interpretacion.momento_funnel],
+                    ['Resultado esperado',interpretacion.resultado_esperado],
+                  ].filter(([,v])=>v).map(([k,v])=>(
+                    <div key={k} style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px'}}>
+                      <p style={T.label}>{k}</p>
+                      <p style={{fontSize:'12px',color:C.txt,marginTop:'3px',lineHeight:'1.5'}}>{v}</p>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={()=>{setInterpretacion(null);setPreguntasIA([]);setRespuestasIA({});}} style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer',textDecoration:'underline',marginBottom:'14px'}}>
+                  ✏️ No es correcto — volver a analizar
+                </button>
+
+                {datosNecesarios&&datosNecesarios.length>0&&(()=>{
+                  // Disponibilidad y ORIGEN calculados EN VIVO — no lo que devolvió la IA en su momento, sino lo que hay subido ahora mismo
+                  const fuentesGA4=[
+                    csvRutas&&'CSV de esta URL (test)',
+                    datosExtraCsv&&'CSV combinado subido aquí',
+                    project.funnelVolCsv&&'CSV del funnel (proyecto)',
+                    project.funnelDispCsv&&'CSV funnel por dispositivo (proyecto)',
+                    project.exp1Data&&'Exp1 — Quién es el usuario (proyecto)',
+                    project.exp2Data&&'Exp2 — Cómo llega (proyecto)',
+                    project.exp3Data&&'Exp3 — Cómo navega (proyecto)',
+                    project.kpisCsv&&'CSV de KPIs (proyecto)',
+                    project.busquedaCsv&&'CSV de búsqueda interna (proyecto)',
+                    project.busquedaSegmentoCsv&&'CSV de términos por segmento (proyecto)',
+                    (!csvRutas&&!datosExtraCsv&&!project.funnelVolCsv&&!project.exp1Data&&project.kpis?.cvr)&&'KPIs básicos del proyecto (sin CSV)',
+                  ].filter(Boolean);
+                  const fuentesCualitativo=[
+                    pageImgs?.heatmapClics&&'Heatmap de clics (test)',
+                    pageImgs?.heatmapScroll&&'Heatmap de scroll (test)',
+                    project.funnelQualImgs&&Object.keys(project.funnelQualImgs).length>0&&'Capturas del funnel (proyecto)',
+                  ].filter(Boolean);
+                  const fuentesCrm=[project.crm?.csv&&'CSV de CRM (proyecto)',project.crm?.plataforma&&`CRM conectado — ${project.crm.plataforma}`].filter(Boolean);
+                  const origenesDisponibles=d=>{
+                    const f=(d.fuente||'').toLowerCase();
+                    if(/ga4|analytics/.test(f)) return fuentesGA4;
+                    if(/clarity|hotjar|fullstory/.test(f)) return fuentesCualitativo;
+                    if(/crm/.test(f)) return fuentesCrm;
+                    return [];
+                  };
+                  const esDisponible=d=>{
+                    const origenes=origenesDisponibles(d);
+                    if(origenes.length) return true;
+                    if(!/ga4|analytics|clarity|hotjar|fullstory|crm/.test((d.fuente||'').toLowerCase())) return !!d.disponible;
+                    return false;
+                  };
+                  const faltan=datosNecesarios.filter(d=>!esDisponible(d));
+                  return(
+                  <div>
+                    <p style={{...T.label,marginBottom:'8px'}}>Datos necesarios para simular este test</p>
+                    <div style={{overflowX:'auto'}}>
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px',minWidth:'560px'}}>
+                        <thead>
+                          <tr style={{borderBottom:`1px solid ${C.border}`,color:C.txtDim,textAlign:'left'}}>
+                            <th style={{padding:'6px 8px',fontWeight:600}}>Dato</th>
+                            <th style={{padding:'6px 8px',fontWeight:600}}>Prioridad</th>
+                            <th style={{padding:'6px 8px',fontWeight:600}}>Fuente</th>
+                            <th style={{padding:'6px 8px',fontWeight:600}}>De dónde sale</th>
+                            <th style={{padding:'6px 8px',fontWeight:600}}>Por qué</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {datosNecesarios.map((d,i)=>{
+                            const ok=esDisponible(d);
+                            const origenes=origenesDisponibles(d);
+                            return(
+                            <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
+                              <td style={{padding:'7px 8px',color:ok?C.green:C.txt}}>{ok?'✓ ':''}{d.dato}</td>
+                              <td style={{padding:'7px 8px'}}><Tag color={d.prioridad==='Necesario'?'amber':'default'}>{d.prioridad}</Tag></td>
+                              <td style={{padding:'7px 8px',color:C.txtMid}}>{d.fuente}</td>
+                              <td style={{padding:'7px 8px',color:ok?C.green:C.txtDim}}>{ok?origenes.join(' · '):'Aún no subido'}</td>
+                              <td style={{padding:'7px 8px',color:C.txtDim}}>{d.razon}</td>
+                            </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p style={{...T.small,marginTop:'8px'}}>"De dónde sale" muestra TODO lo disponible de esa fuente — puede que solo una parte cubra exactamente ese dato. Se actualiza solo en cuanto subas algo nuevo.</p>
+
+                    {/* Cómo sacar y subir de golpe lo que falte */}
+                    {faltan.length>0&&(
+                      <div style={{marginTop:'14px',border:`1px solid ${C.accent}`,borderRadius:'8px',padding:'12px 14px'}}>
+                        <p style={{...T.label,marginBottom:'8px'}}>Cómo conseguir lo que falta, de una sola vez</p>
+                        {instruccionesExtra?(
+                          <pre style={{whiteSpace:'pre-wrap',fontFamily:'inherit',fontSize:'12px',color:C.txtMid,lineHeight:'1.7',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'10px 12px',marginBottom:'10px'}}>{instruccionesExtra}</pre>
+                        ):(
+                          <p style={{...T.small,marginBottom:'10px'}}>GA4 → Explorar → Exploración en blanco → añade como dimensiones y métricas todo lo listado arriba como pendiente → Exportar CSV.</p>
+                        )}
+                        <CsvUploadSimple
+                          label='Subir CSV con los datos que faltan'
+                          hint='Una sola exportación que cubra todo lo marcado como pendiente arriba'
+                          parsed={datosExtraCsv}
+                          setter={setDatosExtraCsv}
+                          refEl={refDatosExtra}
+                        />
+                        <p style={{...T.small,textAlign:'center',margin:'8px 0'}}>— o pega la tabla copiada directamente de GA4 —</p>
+                        <PasteCsvBox parsed={datosExtraCsv} setter={setDatosExtraCsv}/>
+                        {datosExtraCsv&&<p style={{...T.small,color:C.green,marginTop:'8px'}}>✓ {datosExtraCsv.rows.length} filas recibidas — se usarán como contexto adicional al generar los perfiles.</p>}
+                      </div>
+                    )}
+                  </div>
+                  );
+                })()}
+              </div>
+            )}
           </Card>
 
           {/* CSV sesiones de la URL — protagonista, dato clave del test */}
@@ -2417,10 +3253,10 @@ Devuelve SOLO JSON:
           </Card>
 
           <div style={{display:'flex',justifyContent:'space-between',gap:'10px',marginTop:'12px'}}>
-            <Btn variant='ghost' onClick={onSaveDraft}>💾 Guardar borrador</Btn>
+            <Btn variant='ghost' onClick={handleSaveDraft} disabled={!nombreTest}>{draftSaved?'✓ Guardado':'💾 Guardar borrador'}</Btn>
             <div style={{display:'flex',gap:'10px'}}>
               <Btn variant='ghost' onClick={onCancel}>Cancelar</Btn>
-              <Btn disabled={!url} onClick={()=>setTsub(1)}>Generar perfiles →</Btn>
+              <Btn disabled={!url||!nombreTest} onClick={()=>setTsub(1)}>Continuar →</Btn>
             </div>
           </div>
         </div>
@@ -2428,92 +3264,38 @@ Devuelve SOLO JSON:
 
       {tsub===1&&(
         <div>
-          <p style={{...T.h3,marginBottom:'4px'}}>¿A quién va dirigido este test?</p>
-          <p style={{...T.body,marginBottom:'20px'}}>Define el segmento antes de generar los perfiles. La IA usará solo las filas relevantes del CSV de sesiones y generará agentes de ese segmento concreto.</p>
-
-          <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.label,marginBottom:'14px'}}>Dispositivo</p>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'8px',marginBottom:'6px'}}>
-              {[
-                {v:'todos',label:'Todos',icon:'📱💻'},
-                {v:'mobile',label:'Solo mobile',icon:'📱'},
-                {v:'desktop',label:'Solo desktop',icon:'💻'},
-                {v:'tablet',label:'Solo tablet',icon:'⬜'},
-              ].map(op=>(
-                <div key={op.v} onClick={()=>setSegDispositivo(op.v)}
-                  style={{padding:'12px 8px',borderRadius:'8px',border:`1px solid ${segDispositivo===op.v?C.accent:C.border}`,background:segDispositivo===op.v?C.accentDim:'transparent',cursor:'pointer',textAlign:'center'}}>
-                  <div style={{fontSize:'18px',marginBottom:'4px'}}>{op.icon}</div>
-                  <div style={{fontSize:'11px',fontWeight:600,color:segDispositivo===op.v?C.accent:C.txtMid}}>{op.label}</div>
-                </div>
-              ))}
+          <Card style={{marginBottom:'12px',padding:'16px 0 12px'}}>
+            <div style={{padding:'0 18px',marginBottom:'10px'}}>
+              <p style={T.h3}>Variantes a analizar</p>
             </div>
-            {csvRutas&&segDispositivo!=='todos'&&(
-              <div style={{fontSize:'11px',color:C.green,marginTop:'6px'}}>
-                ✓ Se usarán solo las filas <strong>{segDispositivo}</strong> del CSV ({csvRutas.rows.filter(r=>r.dispositivo?.toLowerCase().includes(segDispositivo)||r['Categoría de dispositivo']?.toLowerCase().includes(segDispositivo)).length} filas)
-              </div>
-            )}
-          </Card>
-
-          <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.label,marginBottom:'14px'}}>Tipo de usuario</p>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px'}}>
-              {[
-                {v:'todos',label:'Todos',desc:'Nuevos y recurrentes',icon:'👥'},
-                {v:'nuevo',label:'Solo nuevos',desc:'Primera visita al site',icon:'🆕'},
-                {v:'recurrente',label:'Solo recurrentes',desc:'Ya conocen la marca',icon:'🔄'},
-              ].map(op=>(
-                <div key={op.v} onClick={()=>setSegTipo(op.v)}
-                  style={{padding:'12px',borderRadius:'8px',border:`1px solid ${segTipo===op.v?C.accent:C.border}`,background:segTipo===op.v?C.accentDim:'transparent',cursor:'pointer'}}>
-                  <div style={{fontSize:'18px',marginBottom:'5px'}}>{op.icon}</div>
-                  <div style={{fontSize:'12px',fontWeight:600,color:segTipo===op.v?C.accent:C.txt,marginBottom:'2px'}}>{op.label}</div>
-                  <div style={{fontSize:'11px',color:C.txtDim}}>{op.desc}</div>
-                </div>
-              ))}
+            <VarianteRowVWO badge='do' badgeColor={C.accent} label='Control' desc={varA} setDesc={setVarA}
+              imgName={imgAName} setImgName={setImgAName} figma={figmaUrlA} setFigma={setFigmaUrlA} refEl={imgRefA}
+              placeholder='Ej: Diseño actual — botón azul'/>
+            <VarianteRowVWO badge='V1' badgeColor={C.green} label='Variación 1' desc={varB} setDesc={setVarB}
+              imgName={imgBName} setImgName={setImgBName} figma={figmaUrl} setFigma={setFigmaUrl} refEl={imgRef}
+              placeholder='Ej: Rediseño propuesto — CTA verde'/>
+            <div style={{padding:'10px 18px 0'}}>
+              <button disabled title='Próximamente — de momento el motor de simulación solo compara A/B'
+                style={{width:'100%',background:'none',border:`1px dashed ${C.border}`,borderRadius:'8px',padding:'8px',color:C.txtDim,fontSize:'11px',cursor:'not-allowed'}}>
+                + Agregar variación (próximamente)
+              </button>
             </div>
           </Card>
 
           <Card style={{marginBottom:'12px'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'14px'}}>
-              <p style={T.label}>Canal de entrada</p>
-              <Tag color='default'>Opcional</Tag>
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px'}}>
-              {[
-                {v:'todos',label:'Todos los canales',icon:'🌐'},
-                {v:'organico',label:'Orgánico / SEO',icon:'🔍'},
-                {v:'paid',label:'Paid (SEM/Social)',icon:'💰'},
-                {v:'email',label:'Email / Newsletter',icon:'📧'},
-                {v:'social',label:'Social orgánico',icon:'📲'},
-                {v:'directo',label:'Directo',icon:'🎯'},
-              ].map(op=>(
-                <div key={op.v} onClick={()=>setSegCanal(op.v)}
-                  style={{padding:'10px',borderRadius:'8px',border:`1px solid ${segCanal===op.v?C.green:C.border}`,background:segCanal===op.v?C.greenDim:'transparent',cursor:'pointer',display:'flex',alignItems:'center',gap:'8px'}}>
-                  <span style={{fontSize:'14px'}}>{op.icon}</span>
-                  <span style={{fontSize:'11px',fontWeight:600,color:segCanal===op.v?C.green:C.txtMid}}>{op.label}</span>
-                </div>
-              ))}
+            <div style={{display:'flex',alignItems:'center',gap:'14px'}}>
+              <p style={{...T.h3,flexShrink:0}}>Asignación de tráfico</p>
+              <span style={{fontSize:'12px',color:C.accent,fontWeight:600}}>A {split}%</span>
+              <input type='range' min='10' max='90' step='5' value={split} onChange={e=>setSplit(Number(e.target.value))} style={{flex:1,accentColor:C.accent}}/>
+              <span style={{fontSize:'12px',color:C.green,fontWeight:600}}>B {100-split}%</span>
             </div>
           </Card>
 
-          {/* Resumen del segmento */}
-          <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',marginBottom:'16px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
-            <p style={{color:C.txt,fontWeight:600,marginBottom:'4px'}}>Segmento seleccionado</p>
-            <p>
-              <span style={{color:C.accent}}>Dispositivo:</span> {segDispositivo==='todos'?'Todos':segDispositivo} &nbsp;·&nbsp;
-              <span style={{color:C.accent}}>Usuario:</span> {segTipo==='todos'?'Todos':segTipo} &nbsp;·&nbsp;
-              <span style={{color:C.accent}}>Canal:</span> {segCanal==='todos'?'Todos':segCanal}
-            </p>
-            {csvRutas
-              ? <p style={{color:C.green,marginTop:'4px'}}>✓ La IA filtrará el CSV de sesiones por este segmento para anclar los perfiles a datos reales.</p>
-              : <p style={{color:C.amber,marginTop:'4px'}}>⚠ Sin CSV de sesiones — la IA inferirá el comportamiento de este segmento a partir de los datos del proyecto.</p>
-            }
-          </div>
-
-          <div style={{display:'flex',justifyContent:'space-between',marginTop:'4px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
             <Btn variant='ghost' onClick={()=>setTsub(0)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              <Btn variant='ghost' onClick={handleSaveDraft}>💾 Guardar borrador</Btn>
-              <Btn onClick={()=>setTsub(2)}>Continuar →</Btn>
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={!nombreTest}>{draftSaved?'✓ Guardado':'💾 Guardar borrador'}</Btn>
+              <Btn disabled={!hip||!varA||!varB} onClick={()=>setTsub(2)}>Continuar →</Btn>
             </div>
           </div>
         </div>
@@ -2521,27 +3303,184 @@ Devuelve SOLO JSON:
 
       {tsub===2&&(
         <div>
+          <Card style={{marginBottom:'12px',border:`1px solid ${C.accent}`}}>
+            <p style={{...T.h3,marginBottom:'6px'}}>Detectar métricas principales</p>
+            <p style={{...T.body,marginBottom:'12px'}}>La IA ya conoce tu hipótesis y las variantes — puede detectarte 1 métrica principal y 4 secundarias directamente. Siempre podrás cambiarlas después, una a una.</p>
+            {(metricaP||metricasS.length>0)&&!confirmarRedetectar?(
+              <Btn variant='ghost' onClick={()=>setConfirmarRedetectar(true)} disabled={recomendandoMetricas}>🔄 Detectar de nuevo con IA</Btn>
+            ):confirmarRedetectar?(
+              <div>
+                <p style={{...T.small,color:C.amber,marginBottom:'8px'}}>⚠ Esto sustituirá la métrica principal y las secundarias que tienes ahora. Podrás volver a editarlas después.</p>
+                <div style={{display:'flex',gap:'8px'}}>
+                  <Btn onClick={()=>{setConfirmarRedetectar(false);recomendarMetricas();}} disabled={recomendandoMetricas}>{recomendandoMetricas?'Analizando hipótesis...':'✦ Sí, detectar de nuevo'}</Btn>
+                  <Btn variant='ghost' onClick={()=>setConfirmarRedetectar(false)}>Cancelar</Btn>
+                </div>
+              </div>
+            ):(
+              <Btn onClick={recomendarMetricas} disabled={recomendandoMetricas}>{recomendandoMetricas?'Analizando hipótesis...':'✦ Detectar métricas principales'}</Btn>
+            )}
+            {errMetricas&&<p style={{color:C.red,fontSize:'12px',marginTop:'8px'}}>⚠ {errMetricas}</p>}
+            {!metricaP&&!metricasS.length&&<p style={{...T.small,marginTop:'10px'}}>O bájate directamente a buscarlas tú mismo abajo.</p>}
+          </Card>
+
+          <Card style={{marginBottom:'12px'}}>
+            <p style={{...T.h3,marginBottom:'4px'}}>Métrica principal <span style={{color:C.red}}>*</span></p>
+            <p style={{...T.body,marginBottom:'12px'}}>La que decide qué variante gana. Busca entre las típicas o crea la tuya y explícala — así la IA sabe exactamente qué mirar.</p>
+            {!metricaP?(
+              <MetricPicker onAdd={m=>{setMetricaP(m.nombre);setMetricaPDesc(m.desc);setMetricaPDireccion(m.direccion);setMetricaPRazon('');setBaselineReal('');setBaselineFuente('');}} exclude={[]} confirmLabel='Usar como principal'/>
+            ):(
+              <div style={{border:`1px solid ${C.accent}`,borderRadius:'8px',padding:'12px 14px',background:C.accentDim}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'10px'}}>
+                  <div>
+                    <p style={{fontSize:'13px',fontWeight:700,color:C.txt}}>{metricaPDireccion==='decrease'?'↓':'↑'} {metricaP}</p>
+                    {metricaPDesc&&<p style={{...T.small,marginTop:'4px'}}>{metricaPDesc}</p>}
+                    {metricaPRazon&&<p style={{...T.small,marginTop:'4px',color:C.accent}}>✦ {metricaPRazon}</p>}
+                  </div>
+                  <button onClick={()=>{setMetricaP('');setMetricaPDesc('');setMetricaPRazon('');setBaselineReal('');setBaselineFuente('');}} style={{background:'none',border:'none',color:C.txtDim,cursor:'pointer',fontSize:'12px',flexShrink:0,whiteSpace:'nowrap'}}>✕ Cambiar</button>
+                </div>
+              </div>
+            )}
+
+            {/* Baseline real — esto es lo que ancla el Control simulado, no un CVR genérico */}
+            {metricaP&&(
+              <div style={{marginTop:'10px',border:`1px solid ${baselineReal?C.green:C.border}`,borderRadius:'8px',padding:'12px 14px'}}>
+                <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'6px'}}>
+                  <p style={T.label}>Baseline real de esta métrica</p>
+                  <Tooltip title='Por qué importa' text='El Control simulado debe partir de aquí, no de un número inventado por la IA. Si el histórico real está al 54% y el Control sintético sale al 9%, la simulación no sirve — por eso lo detectamos y fijamos antes de generar nada.'/>
+                </div>
+                {baselineReal?(
+                  <div>
+                    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                      <input type='number' step='0.1' value={baselineReal} onChange={e=>setBaselineReal(e.target.value)}
+                        style={{width:'90px',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'6px 8px',color:C.txt,fontSize:'14px',fontWeight:700,outline:'none'}}/>
+                      <span style={{color:C.txt,fontSize:'14px',fontWeight:700}}>%</span>
+                      <span style={{color:C.green,fontSize:'12px'}}>✓ el Control se anclará aquí</span>
+                    </div>
+                    {baselineFuente&&<p style={{...T.small,marginTop:'6px'}}>Fuente: {baselineFuente}</p>}
+                    <button onClick={detectarBaseline} disabled={detectandoBaseline} style={{marginTop:'6px',fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>
+                      {detectandoBaseline?'Detectando...':'🔄 Redetectar'}
+                    </button>
+                  </div>
+                ):(
+                  <div>
+                    <Btn variant='ghost' small onClick={detectarBaseline} disabled={detectandoBaseline}>{detectandoBaseline?'Detectando...':'🔍 Detectar baseline real en mis datos'}</Btn>
+                    <span style={{margin:'0 8px',color:C.txtDim,fontSize:'11px'}}>o</span>
+                    <input type='number' step='0.1' placeholder='Introducir a mano (%)' onBlur={e=>e.target.value&&setBaselineReal(e.target.value)}
+                      style={{width:'150px',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'6px 8px',color:C.txt,fontSize:'12px',outline:'none'}}/>
+                  </div>
+                )}
+                {errBaseline&&<p style={{...T.small,color:C.amber,marginTop:'6px'}}>⚠ {errBaseline}</p>}
+                {!baselineReal&&!errBaseline&&<p style={{...T.small,marginTop:'6px'}}>Sin baseline fijado, la IA podría inventar un punto de partida distinto del real — como pasó antes.</p>}
+              </div>
+            )}
+          </Card>
+
+          <Card style={{marginBottom:'12px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
+              <p style={T.h3}>Métricas secundarias</p>
+              <Tag color='default'>Opcional</Tag>
+            </div>
+            <p style={{...T.body,marginBottom:'12px'}}>Detectan efectos downstream, efectos negativos e impacto de negocio — no deciden el ganador. Añade las que quieras, una detrás de otra.</p>
+            {metricasS.length>0&&(
+              <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginBottom:'10px'}}>
+                {metricasS.map((m,i)=>(
+                  <span key={m.nombre+i} onClick={()=>setMetricasS(prev=>prev.filter((_,idx)=>idx!==i))} style={{cursor:'pointer'}} title={m.desc||'Quitar'}>
+                    <Tag color='purple'>{m.direccion==='decrease'?'↓':'↑'} {m.nombre} ✕</Tag>
+                  </span>
+                ))}
+              </div>
+            )}
+            {addingSecondary?(
+              <div>
+                <MetricPicker
+                  onAdd={m=>setMetricasS(prev=>prev.some(x=>x.nombre.toLowerCase()===m.nombre.toLowerCase())?prev:[...prev,m])}
+                  exclude={[metricaP.toLowerCase(),...metricasS.map(m=>m.nombre.toLowerCase())]}
+                  confirmLabel='+ Añadir a la lista'/>
+                <button onClick={()=>setAddingSecondary(false)} style={{marginTop:'8px',fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>
+                  ✓ Listo, ya tengo las que quería
+                </button>
+              </div>
+            ):(
+              <Btn variant='ghost' small onClick={()=>setAddingSecondary(true)}>+ Añadir métrica secundaria</Btn>
+            )}
+          </Card>
+
+          <Card style={{marginBottom:'12px'}}>
+            <label style={{...T.label,display:'block',marginBottom:'6px'}}>Tráfico aproximado de esta página / mes <Tag color='default'>Opcional</Tag></label>
+            <input type='number' value={traficoMensual} onChange={e=>setTraficoMensual(e.target.value)} placeholder='Ej: 14500'
+              style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
+            <p style={{...T.small,marginTop:'3px'}}>Con este dato, el resultado te muestra una estimación de impacto real (usuarios y valor estimado), no solo el % simulado.</p>
+          </Card>
+
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
+            <Btn variant='ghost' onClick={()=>setTsub(1)}>Atrás</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={!nombreTest}>{draftSaved?'✓ Guardado':'💾 Guardar borrador'}</Btn>
+              <Btn disabled={!metricaP} onClick={()=>setTsub(3)}>Continuar →</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tsub===3&&(
+        <div>
+          <SegmentPicker segDispositivo={segDispositivo} setSegDispositivo={setSegDispositivo}
+            segTipo={segTipo} setSegTipo={setSegTipo} segCanal={segCanal} setSegCanal={setSegCanal}/>
+
+          {csvRutas&&segDispositivo!=='todos'&&(()=>{
+            const n=csvRutas.rows.filter(r=>matchDispositivo(r.dispositivo||r['Categoría de dispositivo'],segDispositivo)).length;
+            return(
+              <div style={{fontSize:'11px',color:C.green,marginTop:'-6px',marginBottom:'12px',paddingLeft:'2px'}}>
+                ✓ Se usarán solo las filas <strong>{DISPOSITIVO_LABEL[segDispositivo]}</strong> del CSV ({n} filas)
+              </div>
+            );
+          })()}
+
+          {/* Resumen del segmento */}
+          <div style={{background:'#0A0A18',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',marginBottom:'16px',fontSize:'12px',color:C.txtMid,lineHeight:'1.7'}}>
+            {csvRutas
+              ? <p style={{color:C.green}}>✓ La IA filtrará el CSV de sesiones por este segmento para anclar los perfiles a datos reales.</p>
+              : <p style={{color:C.amber}}>⚠ Sin CSV de sesiones — la IA inferirá el comportamiento de este segmento a partir de los datos del proyecto.</p>
+            }
+          </div>
+
+          <div style={{display:'flex',justifyContent:'space-between',marginTop:'4px'}}>
+            <Btn variant='ghost' onClick={()=>setTsub(2)}>Atrás</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={!nombreTest}>{draftSaved?'✓ Guardado':'💾 Guardar borrador'}</Btn>
+              <Btn onClick={()=>setTsub(4)}>Continuar →</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tsub===4&&(
+        <div>
           <Card style={{marginBottom:'12px'}}>
             <p style={{...T.h3,marginBottom:'8px'}}>Perfiles sintéticos</p>
             <p style={{...T.body,marginBottom:'14px'}}>Cada perfil combina psicología CRO real — motivaciones, objeciones, nivel de consciencia — con comportamiento anclado a los datos de sesión de esta URL.</p>
 
             <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginBottom:'12px'}}>
-              <Tag color='purple'>📱 {segDispositivo==='todos'?'Todos los dispositivos':segDispositivo}</Tag>
+              <Tag color='purple'>📱 {segDispositivo==='todos'?'Todos los dispositivos':DISPOSITIVO_LABEL[segDispositivo]}</Tag>
               <Tag color='purple'>👤 {segTipo==='todos'?'Todos los usuarios':segTipo}</Tag>
               {segCanal!=='todos'&&<Tag color='purple'>🔗 {segCanal}</Tag>}
-              <button onClick={()=>setTsub(1)} style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>cambiar segmento</button>
+              <button onClick={()=>setTsub(3)} style={{fontSize:'11px',color:C.txtDim,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>cambiar segmento</button>
             </div>
 
-            {/* Recomendación automática */}
+            {/* Recomendación automática — basada en datos reales de esta URL, por orden de fiabilidad */}
             {(()=>{
-              const trafico = parseInt(sesionesTotales)||parseInt(project.kpis.trafico)||0;
+              const csvSes = csvRutas ? (csvSummary(csvRutas)?.totalSesiones||0) : 0;
+              const trafico = parseInt(traficoMensual)||csvSes||parseInt(project.kpis.trafico)||0;
+              const fuente = parseInt(traficoMensual)?'el tráfico mensual que indicaste':csvSes?'las sesiones detectadas en el CSV de esta URL':project.kpis.trafico?'el tráfico general del proyecto':null;
               const recArquetipos = trafico<2000?6:trafico<10000?10:trafico<50000?15:trafico<100000?20:30;
-              const recSesiones = trafico<500?100:trafico<2000?500:trafico<10000?Math.min(trafico,2500):trafico<50000?5000:trafico<100000?10000:20000;
+              // Proporcional al tráfico real, no un tramo fijo — así 1.600 reales recomienda ~1.600, no 500
+              const recSesiones = trafico>0 ? Math.round(Math.min(Math.max(trafico,200),20000)/50)*50 : 500;
               const razonArq = trafico<2000?'Tráfico bajo — cubre los patrones principales':trafico<10000?'Tráfico medio — representación suficiente de todos los patrones':trafico<50000?'Tráfico medio-alto — captura segmentos minoritarios':'Alto tráfico — alta diversidad de perfiles';
-              const razonSes = trafico===0?'Introduce sesiones/mes en los KPIs para una recomendación precisa':`Basado en ${trafico.toLocaleString()} sesiones/mes de esta URL`;
+              const razonSes = trafico===0?'Añade el tráfico mensual en el paso "Métricas" o sube el CSV de esta URL para una recomendación precisa':`≈ tu tráfico real (${trafico.toLocaleString()}/mes) — ${fuente}`;
               if(nProfiles===10&&nSesiones===1000&&trafico>0){
                 setTimeout(()=>{setNProfiles(recArquetipos);setNSesiones(recSesiones);},0);
               }
+              const arquetiposDetectados=(project.archetypes||[]).filter(a=>a.poblacion>=3).sort((a,b)=>b.poblacion-a.poblacion).slice(0,recArquetipos);
               return(
                 <div>
                   <div style={{background:'#0A1220',border:`1px solid ${C.accent}`,borderRadius:'10px',padding:'14px 16px',marginBottom:'10px'}}>
@@ -2549,7 +3488,7 @@ Devuelve SOLO JSON:
                       <span>✦</span>
                       <p style={{fontSize:'13px',fontWeight:600,color:C.accent}}>Configuración recomendada para esta URL</p>
                     </div>
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:arquetiposDetectados.length?'14px':0}}>
                       <div style={{background:'#070713',borderRadius:'8px',padding:'10px 12px',textAlign:'center'}}>
                         <div style={{fontSize:'28px',fontWeight:700,color:C.white,marginBottom:'2px'}}>{recArquetipos}</div>
                         <div style={{fontSize:'11px',color:C.accent,fontWeight:600,marginBottom:'4px'}}>arquetipos</div>
@@ -2557,10 +3496,26 @@ Devuelve SOLO JSON:
                       </div>
                       <div style={{background:'#070713',borderRadius:'8px',padding:'10px 12px',textAlign:'center'}}>
                         <div style={{fontSize:'28px',fontWeight:700,color:C.white,marginBottom:'2px'}}>{recSesiones.toLocaleString()}</div>
-                        <div style={{fontSize:'11px',color:C.accent,fontWeight:600,marginBottom:'4px'}}>sesiones</div>
+                        <div style={{fontSize:'11px',color:C.accent,fontWeight:600,marginBottom:'4px'}}>ejecuciones de simulación</div>
                         <div style={{fontSize:'10px',color:C.txtDim,lineHeight:'1.5'}}>{razonSes}</div>
                       </div>
                     </div>
+
+                    {/* Qué tipos de arquetipo detecta, antes de generar nada */}
+                    {arquetiposDetectados.length>0?(
+                      <div>
+                        <p style={{fontSize:'11px',color:C.txtMid,marginBottom:'8px'}}>Tipos que detecta a partir de tus datos, y que navegarán cada variante:</p>
+                        <div style={{display:'flex',flexWrap:'wrap',gap:'6px'}}>
+                          {arquetiposDetectados.map(a=>(
+                            <Tag key={a.nombre} color='purple'>{a.nombre} · {a.poblacion}%</Tag>
+                          ))}
+                        </div>
+                      </div>
+                    ):(
+                      <p style={{fontSize:'11px',color:C.amber,lineHeight:'1.5'}}>⚠ Este proyecto aún no tiene arquetipos calculados con datos reales — la IA estimará los tipos con criterio general del sector al generar los perfiles.</p>
+                    )}
+
+                    <p style={{fontSize:'10px',color:C.txtDim,marginTop:'10px',lineHeight:'1.5'}}>El número de ejecuciones es capacidad de simulación y cobertura de escenarios — no es un tamaño muestral real ni lo uses para justificar "significancia estadística". Más ejecuciones no dan más certeza, solo repiten más veces el mismo modelo.</p>
                   </div>
 
                   <button onClick={()=>setShowManual(v=>!v)}
@@ -2609,197 +3564,91 @@ Devuelve SOLO JSON:
                 <p style={{...T.small}}>Haz clic en un perfil para ver la ficha completa</p>
               </div>
               <div style={{background:'#0A0A18',border:`1px solid ${C.greenDim}`,borderRadius:'8px',padding:'9px 12px',marginBottom:'12px',fontSize:'12px',color:C.green,lineHeight:'1.6'}}>
-                ✓ <strong>{profiles.arquetipos.length} arquetipos maestros</strong> clonados en <strong>{profiles.total.toLocaleString()} sesiones</strong> con variación estadística ±15% en CVR, scroll y tiempo.
+                ✓ <strong>{profiles.arquetipos.length} arquetipos maestros</strong> clonados en <strong>{profiles.total.toLocaleString()} sesiones simuladas</strong>, con variación individual entre clones para no repetir el mismo perfil exacto.
               </div>
+
+              {/* Validación: la distribución sintética debe parecerse a la real, si hay CSV para comparar */}
+              {csvRutas&&(()=>{
+                const sum=csvSummary(csvRutas);
+                if(!sum||!Object.keys(sum.porDispositivo).length) return null;
+                const totalReal=Object.values(sum.porDispositivo).reduce((s,v)=>s+v,0);
+                const realPct={};
+                Object.entries(sum.porDispositivo).forEach(([d,v])=>{realPct[d]=totalReal?(v/totalReal)*100:0;});
+                const sintCount={};
+                profiles.arquetipos.forEach(p=>{const d=(p.dispositivo||'otros').toLowerCase();sintCount[d]=(sintCount[d]||0)+1;});
+                const totalSint=profiles.arquetipos.length;
+                const dispositivos=[...new Set([...Object.keys(realPct),...Object.keys(sintCount)])];
+                return(
+                  <div style={{background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'12px 14px',marginBottom:'12px'}}>
+                    <p style={{...T.label,marginBottom:'4px'}}>Antes de lanzar: ¿esta población se parece a tu tráfico real?</p>
+                    <p style={{...T.small,marginBottom:'10px'}}>No es un test ya lanzado — es tu tráfico histórico real (del CSV que subiste) frente a los perfiles sintéticos que se acaban de generar, para comprobar que se parecen antes de simular nada.</p>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px'}}>
+                      <thead>
+                        <tr style={{borderBottom:`1px solid ${C.border}`,color:C.txtDim,textAlign:'left'}}>
+                          <th style={{padding:'4px 6px',fontWeight:600}}>Dispositivo</th>
+                          <th style={{padding:'4px 6px',fontWeight:600}}>Tu tráfico real (CSV)</th>
+                          <th style={{padding:'4px 6px',fontWeight:600}}>Perfiles generados</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dispositivos.map(d=>{
+                          const rp=realPct[d]||0,sp=totalSint?(sintCount[d]||0)/totalSint*100:0;
+                          const desviado=Math.abs(rp-sp)>8;
+                          return(
+                            <tr key={d} style={{borderBottom:`1px solid ${C.border}`}}>
+                              <td style={{padding:'6px',color:C.txt,textTransform:'capitalize'}}>{d}</td>
+                              <td style={{padding:'6px',color:C.txtMid}}>{rp.toFixed(1)}%</td>
+                              <td style={{padding:'6px',color:desviado?C.amber:C.green,fontWeight:600}}>{sp.toFixed(1)}%{desviado?' ⚠':' ✓'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <p style={{...T.small,marginTop:'8px'}}>Si algún ⚠ se desvía mucho, los perfiles generados no están representando bien tu tráfico real — considera regenerar antes de lanzar.</p>
+                  </div>
+                );
+              })()}
               <ProfileGrid profiles={profiles.arquetipos} sector={project.sector}/>
             </div>
           )}
 
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'12px'}}>
-            <Btn variant='ghost' onClick={()=>setTsub(1)}>Atrás</Btn>
-            <div style={{display:'flex',gap:'10px'}}>
-              <Btn variant='ghost' onClick={handleSaveDraft}>💾 Guardar borrador</Btn>
-              <Btn variant='ghost' onClick={()=>{setProfiles(null);generarPerfiles();}}>
-                {profiles?'Regenerar':'Generar perfiles'}
-              </Btn>
-              <Btn disabled={!profiles} onClick={()=>{if(!hip&&contexto)setHip(contexto);setTsub(3);}}>Continuar →</Btn>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tsub===3&&profiles&&profiles.arquetipos&&(
-        <div>
-          <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'14px'}}>Configuración del test</p>
-
-            {/* Hipótesis */}
-            <div style={{marginBottom:'14px'}}>
-              <label style={{...T.label,display:'block',marginBottom:'5px'}}>Hipótesis <span style={{color:C.red}}>*</span></label>
-              <textarea value={hip} onChange={e=>setHip(e.target.value)} placeholder='Creemos que [cambio] aumentará [métrica] porque [razón basada en datos]...'
-                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',resize:'vertical',minHeight:'70px'}}/>
-              <p style={{...T.small,marginTop:'3px'}}>Cambio propuesto + efecto esperado + razón basada en datos.</p>
-            </div>
-
-            {/* Variantes — descripción */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'16px'}}>
-              <div>
-                <label style={{...T.label,display:'block',marginBottom:'5px'}}><Tag color='purple'>Variante A</Tag> <span style={{color:C.red}}>*</span></label>
-                <input value={varA} onChange={e=>setVarA(e.target.value)} placeholder="Ej: Diseño actual — botón azul"
-                  style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
-              </div>
-              <div>
-                <label style={{...T.label,display:'block',marginBottom:'5px'}}><Tag color='green'>Variante B</Tag> <span style={{color:C.red}}>*</span></label>
-                <input value={varB} onChange={e=>setVarB(e.target.value)} placeholder="Ej: Rediseño propuesto — CTA verde"
-                  style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
-              </div>
-            </div>
-
-            {/* Diseños — A y B en paralelo */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'4px'}}>
-              <VarianteDesign label='Variante A' color={C.accent} imgName={imgAName} setImgName={setImgAName} figma={figmaUrlA} setFigma={setFigmaUrlA} refEl={imgRefA}/>
-              <VarianteDesign label='Variante B' color={C.green} imgName={imgBName} setImgName={setImgBName} figma={figmaUrl} setFigma={setFigmaUrl} refEl={imgRef}/>
-            </div>
-            <p style={{...T.small,marginBottom:'0'}}>Sube capturas JPG/PNG o pega links de Figma. La IA interpretará los diseños para simular cómo reacciona cada arquetipo a cada variante.</p>
-          </Card>
-
-          {/* Métricas */}
-          <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.h3,marginBottom:'14px'}}>Métricas del test</p>
-
-            {/* Métrica principal */}
-            <div style={{marginBottom:'16px'}}>
-              <label style={{...T.label,display:'block',marginBottom:'6px'}}>Métrica principal <span style={{color:C.red}}>*</span></label>
-              <p style={{...T.small,marginBottom:'8px'}}>La métrica decisiva. La que determinará qué variante gana.</p>
-              <select value={metricaP} onChange={e=>setMetricaP(e.target.value)}
-                style={{width:'100%',background:'#070713',border:`1px solid ${C.border}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none',marginBottom:'8px'}}>
-                <optgroup label='— Conversión'>
-                  <option value='tasa de conversión'>Tasa de conversión (CVR)</option>
-                  <option value='transacciones'>Transacciones totales</option>
-                  <option value='ingresos por sesión'>Ingresos por sesión</option>
-                  <option value='ticket medio (AOV)'>Ticket medio (AOV)</option>
-                </optgroup>
-                <optgroup label='— Interacción'>
-                  <option value='clics en CTA principal'>Clics en CTA principal</option>
-                  <option value='añadidos al carrito'>Añadidos al carrito</option>
-                  <option value='inicio de checkout'>Inicio de checkout</option>
-                  <option value='scroll depth'>Scroll depth</option>
-                  <option value='tiempo en página'>Tiempo en página</option>
-                </optgroup>
-                <optgroup label='— Engagement'>
-                  <option value='tasa de rebote'>Tasa de rebote</option>
-                  <option value='páginas por sesión'>Páginas por sesión</option>
-                  <option value='tasa de engagement'>Tasa de engagement</option>
-                </optgroup>
-                <option value='otro'>Otro — escribir a mano</option>
-              </select>
-              {metricaP==='otro'&&(
-                <input value={metricaPCustom} onChange={e=>setMetricaPCustom(e.target.value)}
-                  placeholder='Ej: Clics en banner hero, Reproducciones de vídeo, Descargas de PDF...'
-                  style={{width:'100%',background:'#070713',border:`1px solid ${C.accent}`,borderRadius:'8px',padding:'9px 12px',color:C.txt,fontSize:'13px',outline:'none'}}/>
-              )}
-            </div>
-
-            {/* Métricas secundarias */}
-            <div style={{marginBottom:'14px'}}>
-              <label style={{...T.label,display:'block',marginBottom:'6px'}}>Métricas secundarias <Tag color='default'>Opcional</Tag></label>
-              <p style={{...T.small,marginBottom:'10px'}}>Se analizarán en el reporte pero no deciden el ganador.</p>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px'}}>
-                {[
-                  'Clics en CTA principal','Tasa de rebote','Scroll depth','Tiempo en página',
-                  'Añadidos al carrito','Inicio de checkout','Páginas por sesión','Tasa de engagement',
-                  'Ingresos por sesión','Ticket medio (AOV)','Transacciones','Vistas por usuario',
-                ].filter(m=>m.toLowerCase()!==metricaP.toLowerCase()).map(m=>{
-                  const active=metricasS.includes(m);
-                  return(
-                    <div key={m} onClick={()=>setMetricasS(prev=>active?prev.filter(x=>x!==m):[...prev,m])}
-                      style={{display:'flex',alignItems:'center',gap:'7px',padding:'7px 10px',borderRadius:'7px',cursor:'pointer',
-                        border:`1px solid ${active?C.accent:C.border}`,background:active?C.accentDim:'transparent',fontSize:'12px',color:active?C.accent:C.txtMid}}>
-                      <span style={{fontSize:'10px'}}>{active?'✓':'○'}</span>{m}
-                    </div>
-                  );
-                })}
-              </div>
-              {metricasS.length>0&&(
-                <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginTop:'8px'}}>
-                  {metricasS.map(m=><Tag key={m} color='purple'>{m}</Tag>)}
-                </div>
-              )}
-            </div>
-
-            {/* Split */}
-            <div>
-              <label style={{...T.label,display:'block',marginBottom:'6px'}}>Split de tráfico: A {split}% / B {100-split}%</label>
-              <input type='range' min='10' max='90' step='5' value={split} onChange={e=>setSplit(Number(e.target.value))} style={{width:'100%',accentColor:C.accent}}/>
-              <p style={{...T.small,marginTop:'3px'}}>50/50 para tests exploratorios · 80/20 para proteger tráfico actual</p>
-            </div>
-          </Card>
-
           {errSim&&<p style={{color:C.red,fontSize:'12px',marginBottom:'8px'}}>⚠ {errSim}</p>}
-          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
-            <Btn variant='ghost' onClick={()=>setTsub(2)}>Atrás</Btn>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'12px'}}>
+            <Btn variant='ghost' onClick={()=>setTsub(3)}>Atrás</Btn>
             <div style={{display:'flex',gap:'10px'}}>
-              <Btn variant='ghost' onClick={handleSaveDraft}>💾 Guardar borrador</Btn>
-              <Btn disabled={!hip||!varA||!varB} onClick={simular}>Simular →</Btn>
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={!nombreTest}>{draftSaved?'✓ Guardado':'💾 Guardar borrador'}</Btn>
+              {!profiles?(
+                <Btn onClick={generarPerfiles}>✓ Aceptar y generar perfiles</Btn>
+              ):(
+                <>
+                  <Btn variant='ghost' onClick={()=>{setProfiles(null);generarPerfiles();}}>Regenerar</Btn>
+                  <Btn variant='green' disabled={!hip||!varA||!varB||!metricaP} onClick={simular}>🚀 Lanzar test con estos usuarios</Btn>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {tsub===4&&results&&(
-        <div>
-          <div style={{background:'#0A1A14',border:`1px solid rgba(0,212,170,0.2)`,borderRadius:'12px',padding:'16px 18px',marginBottom:'16px',display:'flex',alignItems:'center',gap:'14px'}}>
-            <span style={{fontSize:'24px'}}>🏆</span>
-            <div style={{flex:1}}>
-              <p style={{fontSize:'15px',fontWeight:700,color:C.green}}>Variante {results.ganador} gana — {results.ganador==='B'?varB:varA}</p>
-              <p style={{fontSize:'12px',color:'#3A6A5A'}}>{results.confianza}% confianza estadística</p>
-            </div>
-            <div style={{textAlign:'right'}}>
-              <div style={{fontSize:'24px',fontWeight:700,color:C.green}}>{results.uplift_cvr>0?'+':''}{Number(results.uplift_cvr).toFixed(1)}%</div>
-              <div style={{fontSize:'11px',color:'#3A5A4A'}}>uplift CVR</div>
-            </div>
-          </div>
-          <Card style={{marginBottom:'12px'}}>
-            <p style={{...T.label,marginBottom:'10px'}}>Resumen QA</p>
-            {[
-              {k:'URL testada',v:url},{k:'Variante A',v:varA},{k:'Variante B',v:varB},
-              {k:'Arquetipos generados',v:profiles.arquetipos.length},{k:'Sesiones simuladas',v:(profiles.total||0).toLocaleString()},{k:'Métrica principal',v:metricaP},
-              {k:'Split',v:`A ${split}% / B ${100-split}%`},
-            ].map(row=>(
-              <div key={row.k} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px'}}>
-                <span style={{color:C.txtDim}}>{row.k}</span>
-                <span style={{color:C.txt,fontWeight:500}}>{row.v}</span>
-              </div>
-            ))}
-          </Card>
-          {results.insights&&results.insights.length>0&&(
-            <Card style={{marginBottom:'12px'}}>
-              <p style={{...T.label,marginBottom:'10px'}}>Insights principales</p>
-              {results.insights.slice(0,2).map((ins,i)=>(
-                <div key={i} style={{display:'flex',gap:'8px',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px',color:C.txtMid,lineHeight:'1.6'}}>
-                  <span style={{color:[C.green,C.amber][i],flexShrink:0,marginTop:'2px'}}>◆</span>{ins}
-                </div>
-              ))}
-            </Card>
-          )}
-          <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
-            <Btn variant='ghost' onClick={()=>setTsub(3)}>Revisar</Btn>
-            <div style={{display:'flex',gap:'10px'}}>
-              <Btn variant='ghost' onClick={handleSaveDraft}>💾 Guardar borrador</Btn>
-              <Btn variant='green' onClick={()=>setTsub(5)}>Lanzar test →</Btn>
-            </div>
-          </div>
-        </div>
+      {tsub===5&&!results&&(
+        <Card style={{textAlign:'center',padding:'40px'}}>
+          <p style={{fontSize:'28px',marginBottom:'10px'}}>◎</p>
+          <p style={T.h3}>No hay resultados de simulación guardados aquí</p>
+          <p style={{...T.body,marginTop:'6px',marginBottom:'16px'}}>Este borrador se guardó antes de tener resultados, o se perdieron al recargar. Vuelve al paso "Perfiles" y simula de nuevo.</p>
+          <Btn onClick={()=>setTsub(4)}>← Volver a Perfiles</Btn>
+        </Card>
       )}
 
-      {tsub===5&&(
+      {tsub===5&&results&&(
         <div>
-          <Card style={{textAlign:'center',padding:'32px',marginBottom:'16px'}}>
-            <div style={{fontSize:'40px',marginBottom:'12px'}}>✓</div>
-            <p style={{...T.h2,marginBottom:'6px'}}>Test listo para lanzar</p>
-            <p style={{...T.body,marginBottom:'20px'}}>El test ha pasado el QA y los resultados de la simulación están disponibles. Guárdalo en el proyecto.</p>
-            <Btn variant='green' onClick={handleSave}>Guardar en proyecto</Btn>
-          </Card>
+          <ReportBody project={project} test={{name:nombreTest,url,varA,varB,traficoMensual}} r={results}/>
+          <div style={{display:'flex',justifyContent:'space-between',gap:'10px',marginTop:'8px'}}>
+            <Btn variant='ghost' onClick={()=>setTsub(4)}>← Revisar / regenerar</Btn>
+            <div style={{display:'flex',gap:'10px'}}>
+              <Btn variant='ghost' onClick={handleSaveDraft} disabled={!nombreTest}>{draftSaved?'✓ Guardado':'💾 Guardar borrador'}</Btn>
+              <Btn variant='green' onClick={handleSave}>Guardar en proyecto</Btn>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -2807,74 +3656,43 @@ Devuelve SOLO JSON:
 }
 
 // ── REPORT VIEW ───────────────────────────────────────────────────────────
-function ReportView({project,test,results,onBack}){
-  const r=results||PILOT_RESULTS[test?.id]||{};
+// Cuerpo del informe — compartido entre ReportView (test ya guardado) y el paso "Resultados"
+// dentro de CreateTest (recién simulado, antes de guardar). Misma vista en los dos sitios.
+function ReportBody({project,test,r}){
   const gB=r.ganador==='B';
   const [openSeg,setOpenSeg]=useState(null);
-  function copiar(){
-    const txt=`REPORTE TEST A/B — SynthAB\n\nProyecto: ${project.name}\nURL: ${test?.url}\n\nGanador: Variante ${r.ganador}\nUplift CVR: ${r.uplift_cvr>0?'+':''}${Number(r.uplift_cvr).toFixed(1)}%\nConfianza: ${r.confianza}%\n\nRecomendación:\n${r.recomendacion_general||r.recomendacion||''}`;
-    navigator.clipboard.writeText(txt).then(()=>alert('Copiado ✓'));
-  }
-  if(!r.ganador) return(
-    <div className='fade' style={{padding:'28px 32px'}}>
-      <button onClick={onBack} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px',marginBottom:'20px'}}>← {project.name}</button>
-      <Card style={{textAlign:'center',padding:'48px'}}>
-        <p style={{fontSize:'32px',marginBottom:'12px'}}>◎</p>
-        <p style={T.h3}>Test en curso — sin resultados todavía</p>
-        <p style={{...T.body,marginTop:'6px'}}>Los resultados aparecerán aquí cuando la simulación esté completada.</p>
-      </Card>
-    </div>
-  );
   const tipoTag={personalizacion:{color:'purple',label:'Personalización'},nuevo_test:{color:'blue',label:'Nuevo test A/B'}};
+  const bajaConfianza=r.confianza!=null&&r.confianza<95;
   return(
-    <div className='fade' style={{padding:'28px 32px',maxWidth:'680px'}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'20px',flexWrap:'wrap',gap:'10px'}}>
-        <div>
-          <button onClick={onBack} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px',marginBottom:'6px',display:'block'}}>← {project.name}</button>
-          <h1 style={T.h1}>{test?.name||'Reporte'}</h1>
-          <p style={{...T.mono,marginTop:'3px'}}>{test?.url}</p>
-        </div>
-        <Btn variant='ghost' onClick={copiar}>Copiar reporte</Btn>
-      </div>
-
+    <div>
       {/* 1. GANADOR OFICIAL */}
-      <div style={{background:'#0A1A14',border:'1px solid rgba(0,212,170,0.2)',borderRadius:'12px',padding:'18px 20px',marginBottom:'16px',display:'flex',alignItems:'center',gap:'14px'}}>
-        <span style={{fontSize:'28px'}}>🏆</span>
+      <div style={{background:bajaConfianza?'#1A140A':'#0A1A14',border:`1px solid ${bajaConfianza?'rgba(245,166,35,0.3)':'rgba(0,212,170,0.2)'}`,borderRadius:'12px',padding:'18px 20px',marginBottom:bajaConfianza?'8px':'16px',display:'flex',alignItems:'center',gap:'14px'}}>
+        <span style={{fontSize:'28px'}}>{bajaConfianza?'⚠️':'🏆'}</span>
         <div style={{flex:1}}>
-          <p style={{fontSize:'16px',fontWeight:700,color:C.green,marginBottom:'3px'}}>Variante {r.ganador} gana</p>
-          <p style={{fontSize:'12px',color:'#3A6A5A'}}>{r.confianza}% confianza estadística</p>
+          <p style={{fontSize:'16px',fontWeight:700,color:bajaConfianza?C.amber:C.green,marginBottom:'3px'}}>Variante {r.ganador} gana{r.ganador==='B'&&test?.varB?` — ${test.varB}`:r.ganador==='A'&&test?.varA?` — ${test.varA}`:''}</p>
+          <p style={{fontSize:'12px',color:bajaConfianza?'#8A6A2A':'#3A6A5A'}}>{r.confianza}% confianza estadística</p>
         </div>
         <div style={{textAlign:'right'}}>
           <div style={{fontSize:'28px',fontWeight:700,color:gB?C.green:C.red}}>{r.uplift_cvr>0?'+':''}{Number(r.uplift_cvr).toFixed(1)}%</div>
           <div style={{fontSize:'11px',color:'#3A5A4A'}}>uplift CVR</div>
         </div>
       </div>
-      <Card style={{marginBottom:'20px'}}>
-        <p style={{...T.label,marginBottom:'10px'}}>Métricas principales</p>
-        {[
-          {name:'Tasa de conversión ⭐',a:(r.cvr_a||0).toFixed(1)+'%',b:(r.cvr_b||0).toFixed(1)+'%',diff:r.uplift_cvr,pos:gB},
-          {name:'Clics en CTA',a:(r.clics_cta_a||0)+'%',b:(r.clics_cta_b||0)+'%',diff:(((r.clics_cta_b-r.clics_cta_a)/(r.clics_cta_a||1))*100).toFixed(1),pos:r.clics_cta_b>r.clics_cta_a},
-          {name:'Tasa de rebote',a:(r.rebote_a||0)+'%',b:(r.rebote_b||0)+'%',diff:(((r.rebote_b-r.rebote_a)/(r.rebote_a||1))*100).toFixed(1),pos:r.rebote_b<r.rebote_a},
-        ].map(m=>(
-          <div key={m.name} style={{display:'flex',alignItems:'center',gap:'10px',padding:'8px 0',borderBottom:`1px solid ${C.border}`}}>
-            <span style={{fontSize:'13px',color:C.txtMid,flex:1}}>{m.name}</span>
-            <span style={{fontSize:'12px',color:C.txtDim}}>A: {m.a}</span>
-            <span style={{fontSize:'14px',fontWeight:600,color:C.white}}>B: {m.b}</span>
-            <span style={{fontSize:'11px',fontWeight:700,padding:'2px 8px',borderRadius:'20px',background:m.pos?C.greenDim:C.redDim,color:m.pos?C.green:C.red}}>{m.diff>0?'+':''}{Number(m.diff).toFixed(1)}%</span>
-          </div>
-        ))}
-      </Card>
+      {bajaConfianza&&(
+        <p style={{...T.small,color:C.amber,marginBottom:'16px'}}>⚠ Esta confianza está por debajo del umbral estándar del 95% — el uplift es positivo, pero la evidencia todavía no es suficiente para llamarlo "ganador" con seguridad. Trátalo como resultado prometedor, no concluyente.</p>
+      )}
+      <ResumenPrimarioCard r={r} traficoMensual={test?.traficoMensual} ticket={project.kpis.ticket}/>
+      <MetricExplorer r={r} varAName={test?.varA} varBName={test?.varB} traficoMensual={test?.traficoMensual}/>
 
-      {/* 2. POR ARQUETIPO, con desglose de audiencias */}
+      {/* 2. LO DIFERENCIAL — desglose por arquetipo, algo que un test A/B real no te puede dar */}
       {r.segmentos&&r.segmentos.length>0&&(()=>{
         const pobs=r.segmentos.map(sg=>sg.poblacion).filter(p=>p!=null);
         const sumPob=pobs.length===r.segmentos.length?pobs.reduce((s,p)=>s+p,0):null;
         const resto=sumPob!=null?Math.max(0,Math.round(100-sumPob)):null;
         return(
         <div style={{marginBottom:'20px'}}>
-          <h2 style={{...T.h2,marginBottom:'6px'}}>Cómo reacciona cada arquetipo</h2>
+          <h2 style={{...T.h2,marginBottom:'4px'}}>Cómo afecta a cada arquetipo</h2>
           <p style={{...T.small,marginBottom:'12px'}}>
-            Se muestran los {r.segmentos.length} arquetipos donde A y B se comportan de forma distinta{sumPob!=null?` — juntos son el ${sumPob}% del tráfico simulado`:''}.
+            Esto es lo que un test A/B con tráfico real no te puede decir hasta tener volumen — aquí lo tienes desde el primer test. Se muestran los {r.segmentos.length} arquetipos donde A y B se comportan de forma distinta{sumPob!=null?` — juntos son el ${sumPob}% del tráfico simulado`:''}.
             {resto!=null&&resto>0?` El ${resto}% restante no mostró diferencias relevantes entre variantes, así que no cambia la decisión del ganador.`:''}
           </p>
           {r.segmentos.map(sg=>(
@@ -2937,7 +3755,7 @@ function ReportView({project,test,results,onBack}){
               <span style={{fontSize:'18px',flexShrink:0}}>✦</span>
               <div>
                 <p style={{...T.h3,marginBottom:'4px'}}>Recomendación general</p>
-                <p style={{...T.body}}>{r.recomendacion_general||r.recomendacion}</p>
+                <p style={T.body}>{r.recomendacion_general||r.recomendacion}</p>
               </div>
             </div>
           )}
@@ -2949,13 +3767,44 @@ function ReportView({project,test,results,onBack}){
               </div>
               <p style={{...T.body,marginBottom:'8px'}}>{rec.accion}</p>
               <div style={{display:'flex',gap:'16px',flexWrap:'wrap'}}>
-                {rec.kpi_afectado&&<p style={{...T.small}}><b style={{color:C.txtMid,fontWeight:600}}>KPI:</b> {rec.kpi_afectado}</p>}
+                {rec.kpi_afectado&&<p style={T.small}><b style={{color:C.txtMid,fontWeight:600}}>KPI:</b> {rec.kpi_afectado}</p>}
                 {rec.retorno_esperado&&<p style={{...T.small,color:C.green}}><b style={{color:C.green,fontWeight:600}}>Retorno esperado:</b> {rec.retorno_esperado}</p>}
               </div>
             </Card>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ReportView({project,test,results,onBack}){
+  const r=results||PILOT_RESULTS[test?.id]||{};
+  function copiar(){
+    const txt=`REPORTE TEST A/B — SynthAB\n\nProyecto: ${project.name}\nURL: ${test?.url}\n\nGanador: Variante ${r.ganador}\nUplift CVR: ${r.uplift_cvr>0?'+':''}${Number(r.uplift_cvr).toFixed(1)}%\nConfianza: ${r.confianza}%\n\nRecomendación:\n${r.recomendacion_general||r.recomendacion||''}`;
+    navigator.clipboard.writeText(txt).then(()=>alert('Copiado ✓'));
+  }
+  if(!r.ganador) return(
+    <div className='fade' style={{padding:'28px 32px'}}>
+      <button onClick={onBack} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px',marginBottom:'20px'}}>← {project.name}</button>
+      <Card style={{textAlign:'center',padding:'48px'}}>
+        <p style={{fontSize:'32px',marginBottom:'12px'}}>◎</p>
+        <p style={T.h3}>Test en curso — sin resultados todavía</p>
+        <p style={{...T.body,marginTop:'6px'}}>Los resultados aparecerán aquí cuando la simulación esté completada.</p>
+      </Card>
+    </div>
+  );
+  return(
+    <div className='fade' style={{padding:'28px 32px',maxWidth:'680px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'20px',flexWrap:'wrap',gap:'10px'}}>
+        <div>
+          <button onClick={onBack} style={{background:'none',border:'none',color:C.txtMid,cursor:'pointer',fontSize:'13px',marginBottom:'6px',display:'block'}}>← {project.name}</button>
+          <h1 style={T.h1}>{test?.name||'Reporte'}</h1>
+          <p style={{...T.mono,marginTop:'3px'}}>{test?.url}</p>
+        </div>
+        <Btn variant='ghost' onClick={copiar}>Copiar reporte</Btn>
+      </div>
+      <ReportBody project={project} test={test} r={r}/>
     </div>
   );
 }
@@ -2994,6 +3843,23 @@ function ApiScreen({onReady}){
 }
 
 // ── APP ───────────────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component{
+  constructor(p){super(p);this.state={error:null};}
+  static getDerivedStateFromError(error){return{error};}
+  render(){
+    if(this.state.error) return(
+      <div style={{padding:'40px',maxWidth:'520px',margin:'60px auto',textAlign:'center'}}>
+        <p style={{fontSize:'32px',marginBottom:'12px'}}>⚠</p>
+        <p style={{...T.h2,marginBottom:'8px'}}>Algo ha fallado al mostrar esta pantalla</p>
+        <p style={{...T.body,marginBottom:'16px'}}>No se ha perdido ningún dato guardado — solo esta vista. Recarga la página para continuar.</p>
+        <p style={{...T.small,marginBottom:'16px',fontFamily:'monospace'}}>{String(this.state.error?.message||this.state.error)}</p>
+        <Btn onClick={()=>window.location.reload()}>Recargar</Btn>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 function App(){
   const [apiKey,setApiKey]=useState('');
   const [nav,setNav]=useState('projects');
@@ -3005,10 +3871,11 @@ function App(){
     return [PILOT_PROJECT];
   });
   const [view,setView]=useState({screen:'list'});
+  const [saveError,setSaveError]=useState(null);
 
   useEffect(()=>{
-    try{ localStorage.setItem('synthab_projects', JSON.stringify(projects)); }
-    catch(e){ console.error('No se pudo guardar en localStorage (¿cuota superada?):',e); }
+    try{ localStorage.setItem('synthab_projects', JSON.stringify(projects)); setSaveError(null); }
+    catch(e){ console.error('No se pudo guardar en localStorage (¿cuota superada?):',e); setSaveError('No se ha podido guardar en este navegador — puede que el almacenamiento esté lleno (CSVs o imágenes muy grandes). Lo que ves en pantalla es correcto, pero se perderá si recargas.'); }
   },[projects]);
 
   if(!apiKey) return(
@@ -3037,11 +3904,13 @@ function App(){
     const updatedProject=projects.find(p=>p.id===projectId);
     setView({screen:'detail',project:{...updatedProject,tests:upsertTests(updatedProject.tests,t)}});
   }
-  // Guardar borrador: persiste el test a medias y vuelve al proyecto, sin exigir que el flujo esté completo
+  function deleteTest(projectId,testId){
+    setProjects(prev=>prev.map(p=>p.id===projectId?{...p,tests:p.tests.filter(t=>t.id!==testId)}:p));
+  }
+  // Guardar borrador: persiste el test a medias SIN navegar — el usuario se queda donde estaba,
+  // el botón muestra "✓ Guardado" como confirmación. Solo "Cancelar" te saca del flujo.
   function saveTestDraft(projectId,t){
     setProjects(prev=>prev.map(p=>p.id===projectId?{...p,tests:upsertTests(p.tests,t)}:p));
-    const updatedProject=projects.find(p=>p.id===projectId);
-    setView({screen:'detail',project:{...updatedProject,tests:upsertTests(updatedProject.tests,t)}});
   }
 
   const currentProject=view.project?projects.find(p=>p.id===view.project.id)||view.project:null;
@@ -3050,10 +3919,16 @@ function App(){
     <div style={{display:'flex',minHeight:'100vh',background:C.bg}}>
       <Sidebar active={nav} onNav={id=>{setNav(id);setView({screen:'list'});}} apiKey={apiKey} onLogout={()=>setApiKey('')}/>
       <div style={{flex:1,overflowY:'auto',minWidth:0}}>
+        {saveError&&(
+          <div style={{background:C.redDim,borderBottom:`1px solid ${C.red}`,padding:'10px 20px',display:'flex',alignItems:'center',gap:'10px',fontSize:'12px',color:C.red}}>
+            <span>⚠</span><span style={{flex:1}}>{saveError}</span>
+            <button onClick={()=>setSaveError(null)} style={{background:'none',border:'none',color:C.red,cursor:'pointer',fontSize:'14px'}}>✕</button>
+          </div>
+        )}
         {nav==='projects'&&(
           <>
             {view.screen==='list'&&<ProjectsList projects={projects} onSelect={p=>setView({screen:'detail',project:p})} onCreate={()=>setView({screen:'create'})}/>}
-            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} apiKey={apiKey} onUpdateProject={p=>setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr))} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView(t.status==='borrador'?{screen:'newtest',project:currentProject,testDraft:t}:{screen:'report',project:currentProject,test:t})} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
+            {view.screen==='detail'&&currentProject&&<ProjectDetail project={currentProject} apiKey={apiKey} onUpdateProject={p=>setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr))} onBack={()=>setView({screen:'list'})} onEdit={()=>setView({screen:'edit',project:currentProject})} onNewTest={()=>setView({screen:'newtest',project:currentProject})} onViewTest={t=>setView(t.draft?{screen:'newtest',project:currentProject,testDraft:t}:{screen:'report',project:currentProject,test:t})} onDeleteTest={id=>deleteTest(currentProject.id,id)} onViewReport={()=>setView({screen:'report',project:currentProject,test:currentProject.tests[0]})}/>}
             {view.screen==='create'&&<CreateProject apiKey={apiKey} onSave={addProject} onSaveDraft={saveDraft} onCancel={()=>setView({screen:'list'})}/>}
             {view.screen==='edit'&&currentProject&&<CreateProject apiKey={apiKey} initial={currentProject} onSave={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));}} onSaveDraft={p=>{setProjects(prev=>prev.map(pr=>pr.id===p.id?p:pr));}} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
             {view.screen==='newtest'&&currentProject&&<CreateTest project={currentProject} apiKey={apiKey} initial={view.testDraft} onSave={t=>addTest(currentProject.id,t)} onSaveDraft={t=>saveTestDraft(currentProject.id,t)} onCancel={()=>setView({screen:'detail',project:currentProject})}/>}
@@ -3108,7 +3983,7 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary,null,React.createElement(App)));
 </script>
 </body>
 </html>
